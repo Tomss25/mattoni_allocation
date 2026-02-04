@@ -305,8 +305,8 @@ if uploaded_file is not None:
                 l3_corr = get_avg_correlation(df, triplet_assets)
                 l3_series = df[list(triplet_assets)].pct_change().dropna().dot(triplet_weights)
 
-        # --- TABS ---
-        tab1, tab2, tab3, tab4 = st.tabs(["1️⃣ DASHBOARD", "2️⃣ CORRELAZIONI", "3️⃣ BACKTEST", "📘 METODOLOGIA"])
+        # --- TABS (AGGIUNTA TAB DATA CHECK) ---
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["1️⃣ DASHBOARD", "2️⃣ CORRELAZIONI", "3️⃣ BACKTEST", "📘 METODOLOGIA", "🔍 DATA CHECK"])
 
         # --- TAB 1: DASHBOARD ---
         with tab1:
@@ -439,6 +439,24 @@ if uploaded_file is not None:
             
             ⚠️ **DISCLAIMER:** *Questo modello soffre di "Look-Ahead Bias". Ha ottimizzato i pesi guardando i dati del passato. Il futuro non sarà identico. Usa questi risultati come indicazione di potenziale strutturale, non come garanzia di profitto.*
             """)
+        
+        # --- TAB 5: DATA CHECK (NUOVO) ---
+        with tab5:
+            st.subheader("🔍 Ispezione Dati Elaborati (Debug)")
+            
+            if fida_mode:
+                st.success("✅ **Modalità FIDA Attiva**\n\nStai visualizzando i dati DOPO la pulizia: rimozione 'undefined', conversione virgola -> punto, e taglio delle righe incomplete.")
+            else:
+                st.info("ℹ️ **Modalità Standard**\n\nStai visualizzando i dati caricati normalmente. Se vedi errori qui, il file CSV originale ha problemi o dovevi attivare la modalità FIDA.")
+
+            st.markdown(f"**Dimensioni del Dataset processato:** {df.shape[0]} righe (Settimane) x {df.shape[1]} colonne (Asset)")
+            
+            st.markdown("### 1. Anteprima Dati (Head)")
+            st.dataframe(df.head(50), use_container_width=True)
+            
+            st.markdown("### 2. Statistiche Descrittive")
+            st.markdown("Verifica qui che min/max abbiano senso (es. niente valori a 0 o negativi se sono prezzi/indici).")
+            st.dataframe(df.describe(), use_container_width=True)
 
     else:
         st.error("File non valido o vuoto dopo la pulizia.")
