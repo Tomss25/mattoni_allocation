@@ -93,18 +93,49 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- MOTORE MATEMATICO (INVARIATO) ---
+# --- MOTORE MATEMATICO ---
 
-def load_data(file):
-    """Caricamento robusto (Sep=; Dec=, Date=GG/MM/AAAA)."""
-    try:
-        df = pd.read_csv(file, sep=';', decimal=',', index_col=0, parse_dates=True, dayfirst=True)
-        df.columns = df.columns.str.strip()
-        for col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        return df.dropna()
-    except Exception as e:
-        return None
+def load_data(file, fida_mode=False):
+    """
+    Caricamento dati.
+    - Se fida_mode=True: Applica pulizia aggressiva per file 'Grafico.csv' (undefined, base 100).
+    - Se fida_mode=False: Usa il caricamento standard originale.
+    """
+    if fida_mode:
+        try:
+            # 1. Caricamento come stringa per gestire 'undefined'
+            df = pd.read_csv(file, sep=';', dtype=str)
+            df.columns = df.columns.str.strip()
+            
+            # 2. Pulizia Colonne (eccetto Data)
+            for col in df.columns:
+                if col != 'Data':
+                    # Rimuove undefined, cambia virgola in punto
+                    df[col] = df[col].astype(str).str.strip()\
+                                     .str.replace('undefined', 'NaN', case=False)\
+                                     .str.replace(',', '.')
+                    # Converte in numero
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # 3. Gestione Data
+            df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
+            df.set_index('Data', inplace=True)
+            
+            # 4. Drop NaN (Sincronizzazione serie)
+            return df.dropna()
+        except Exception as e:
+            st.error(f"Errore lettura FIDA: {e}")
+            return None
+    else:
+        # --- LOGICA ORIGINALE (INTATTA) ---
+        try:
+            df = pd.read_csv(file, sep=';', decimal=',', index_col=0, parse_dates=True, dayfirst=True)
+            df.columns = df.columns.str.strip()
+            for col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            return df.dropna()
+        except Exception as e:
+            return None
 
 def clean_asset_name(name):
     """Rimuove il rumore dal nome dell'asset."""
@@ -198,7 +229,14 @@ st.title("🛡️ Asset Optimizer: Executive Dashboard")
 # SIDEBAR
 with st.sidebar:
     st.header("1. Data Feed")
-    uploaded_file = st.file_uploader("Carica CSV (basketai.csv)", type=["csv"])
+    uploaded_file = st.file_uploader("Carica CSV", type=["csv"])
+    
+    # --- NUOVO PULSANTE FIDA ---
+    st.markdown("---")
+    fida_mode = st.checkbox("Format FIDA (Base 100/Undefined)", value=False, help="Spunta questa casella se stai caricando il file 'Grafico.csv' con dati grezzi e undefined.")
+    st.markdown("---")
+    # ---------------------------
+
     manual_placeholder = st.empty()
     
     st.divider()
@@ -213,7 +251,8 @@ with st.sidebar:
     )
 
 if uploaded_file is not None:
-    df = load_data(uploaded_file)
+    # PASSAGGIO DEL PARAMETRO FIDA_MODE
+    df = load_data(uploaded_file, fida_mode=fida_mode)
     
     if df is not None and not df.empty:
         assets = df.columns.tolist()
@@ -385,6 +424,6 @@ if uploaded_file is not None:
             """)
 
     else:
-        st.error("File non valido.")
+        st.error("File non valido o vuoto dopo la pulizia.")
 else:
     st.info("Carica il file CSV.")
