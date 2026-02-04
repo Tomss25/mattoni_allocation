@@ -427,8 +427,8 @@ if uploaded_file is not None:
             with col_show2:
                 st.markdown("**2. ENGINE (Variazioni Settimanali %)**")
                 st.markdown("Questi sono i numeri che il modello ottimizza.")
-                # Formattazione colore per evidenziare le variazioni
-                st.dataframe(df_returns.style.format("{:.4f}%").background_gradient(cmap='RdYlGn', vmin=-0.5, vmax=0.5), use_container_width=True)
+                # FIX: Rimosso background_gradient che richiede matplotlib
+                st.dataframe(df_returns.style.format("{:.4f}%"), use_container_width=True)
             
             # Check Validità Dati
             if df.select_dtypes(include=[np.number]).empty:
