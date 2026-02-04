@@ -170,8 +170,13 @@ def get_avg_correlation(data, assets):
     values = corr_matrix.values[np.triu_indices_from(corr_matrix, k=1)]
     return values.mean()
 
-def optimize_portfolio(returns):
+def optimize_portfolio(returns, min_weight=0.0):
+    """
+    Ottimizza i pesi del portafoglio per massimizzare lo Sharpe Ratio.
+    Parametro 'min_weight': impone una percentuale minima per asset (es. 0.01 per 1%).
+    """
     n_assets = len(returns.columns)
+    
     def objective(weights):
         w = np.array(weights)
         ret = np.sum(returns.mean() * w) * 52
@@ -180,7 +185,11 @@ def optimize_portfolio(returns):
         return -s
 
     constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-    bounds = tuple((0, 1) for _ in range(n_assets))
+    
+    # MODIFICA CHIAVE: Imposto i bounds con il min_weight
+    # Questo forza l'ottimizzatore a non andare mai sotto quella soglia (es. 1%)
+    bounds = tuple((min_weight, 1.0) for _ in range(n_assets))
+    
     init_guess = [1./n_assets for _ in range(n_assets)]
     
     result = minimize(objective, init_guess, method='SLSQP', bounds=bounds, constraints=constraints)
@@ -196,13 +205,20 @@ def find_best_optimized_combination(data, k, max_corr_threshold=1.0):
     best_weights = None
     best_full_stats = None
     
+    # Se cerchiamo più di 1 asset, forziamo una presenza minima dell'1%
+    # per evitare che l'ottimizzatore "spenga" un asset rendendolo invisibile.
+    min_w = 0.01 if k > 1 else 0.0
+    
     for combo in itertools.combinations(assets, k):
         # Filtro correlazione
         current_corr = get_avg_correlation(data, combo)
         
         if current_corr <= max_corr_threshold:
             subset = data[list(combo)].pct_change().dropna()
-            weights = optimize_portfolio(subset)
+            
+            # Passiamo il vincolo di peso minimo
+            weights = optimize_portfolio(subset, min_weight=min_w)
+            
             r, v, s, sort, mdd = get_advanced_stats(weights, subset)
             
             if s > best_sharpe:
@@ -217,6 +233,7 @@ def format_composition(assets, weights):
     items = []
     sorted_pairs = sorted(zip(assets, weights), key=lambda x: x[1], reverse=True)
     for a, w in sorted_pairs:
+        # Mostriamo tutto ciò che è > 0.1% (ora sono tutti > 1% grazie al fix)
         if w > 0.001: 
             clean_name = clean_asset_name(a)
             items.append(f"{clean_name} ({w*100:.0f}%)")
@@ -231,7 +248,7 @@ with st.sidebar:
     st.header("1. Data Feed")
     uploaded_file = st.file_uploader("Carica CSV", type=["csv"])
     
-    # --- NUOVO PULSANTE FIDA ---
+    # --- PULSANTE FIDA ---
     st.markdown("---")
     fida_mode = st.checkbox("Format FIDA (Base 100/Undefined)", value=False, help="Spunta questa casella se stai caricando il file 'Grafico.csv' con dati grezzi e undefined.")
     st.markdown("---")
