@@ -93,77 +93,26 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- MOTORE MATEMATICO ---
+# --- MOTORE MATEMATICO (INVARIATO) ---
 
-def load_data(file, fida_mode=False):
-    """
-    Caricamento dati con LOGICA TAPPA-BUCHI (Forward Fill).
-    Se manca un dato, usa quello della settimana prima invece di cancellare la data.
-    """
-    debug_info = {"raw_rows": 0, "clean_rows": 0, "dropped": 0, "duplicates_dropped": 0}
-    
+def load_data(file):
+    """Caricamento robusto (Sep=; Dec=, Date=GG/MM/AAAA)."""
     try:
-        # 1. Caricamento
-        if fida_mode:
-            df = pd.read_csv(file, sep=';', dtype=str)
-        else:
-            df = pd.read_csv(file, sep=';', decimal=',')
-            
-        debug_info["raw_rows"] = len(df)
+        df = pd.read_csv(file, sep=';', decimal=',', index_col=0, parse_dates=True, dayfirst=True)
         df.columns = df.columns.str.strip()
-        
-        # 2. Pulizia Colonne
-        if fida_mode:
-            for col in df.columns:
-                if col != 'Data':
-                    df[col] = df[col].astype(str).str.strip()\
-                                     .str.replace('undefined', 'NaN', case=False)\
-                                     .str.replace('null', 'NaN', case=False)\
-                                     .str.replace(',', '.')
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-        else:
-             for col in df.columns:
-                if col != 'Data' and df[col].dtype == object:
-                     df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce')
-
-        # 3. Gestione Data
-        # Usa errors='coerce' per trasformare date invalide in NaT
-        df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
-        
-        # Rimuove righe dove la data è NaT (fondamentale per file con righe vuote alla fine)
-        df = df.dropna(subset=['Data'])
-        df.set_index('Data', inplace=True)
-        
-        # 4. FIX DUPLICATI
-        if df.index.duplicated().any():
-            initial_count = len(df)
-            df = df.groupby(level=0).last()
-            debug_info["duplicates_dropped"] = initial_count - len(df)
-        
-        df = df.sort_index()
-
-        # 5. FIX BUCHI (IL PUNTO CRITICO)
-        # Invece di dropna() brutale, usiamo ffill() (copia il valore precedente)
-        # e poi bfill() (copia il successivo se il buco è all'inizio)
-        df = df.ffill().bfill()
-
-        # Ora dropna rimuove solo le righe che sono rimaste vuote nonostante tutto (es. colonne vuote)
-        df_clean = df.dropna()
-        
-        debug_info["clean_rows"] = len(df_clean)
-        debug_info["dropped"] = debug_info["raw_rows"] - debug_info["clean_rows"]
-        
-        return df_clean, debug_info
-        
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        return df.dropna()
     except Exception as e:
-        st.error(f"Errore lettura file: {e}")
-        return None, debug_info
+        return None
 
 def clean_asset_name(name):
+    """Rimuove il rumore dal nome dell'asset."""
     clean = re.sub(r'\s*\(.*\)', '', name)
     return clean.strip()
 
 def get_advanced_stats(weights, returns):
+    """Calcola metriche avanzate: Rendimento, Volatilità, Sharpe, Sortino, MDD."""
     weights = np.array(weights)
     port_series = returns.dot(weights)
     
@@ -190,9 +139,8 @@ def get_avg_correlation(data, assets):
     values = corr_matrix.values[np.triu_indices_from(corr_matrix, k=1)]
     return values.mean()
 
-def optimize_portfolio(returns, min_weight=0.0):
+def optimize_portfolio(returns):
     n_assets = len(returns.columns)
-    
     def objective(weights):
         w = np.array(weights)
         ret = np.sum(returns.mean() * w) * 52
@@ -201,7 +149,7 @@ def optimize_portfolio(returns, min_weight=0.0):
         return -s
 
     constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-    bounds = tuple((min_weight, 1.0) for _ in range(n_assets))
+    bounds = tuple((0, 1) for _ in range(n_assets))
     init_guess = [1./n_assets for _ in range(n_assets)]
     
     result = minimize(objective, init_guess, method='SLSQP', bounds=bounds, constraints=constraints)
@@ -217,14 +165,13 @@ def find_best_optimized_combination(data, k, max_corr_threshold=1.0):
     best_weights = None
     best_full_stats = None
     
-    min_w = 0.01 if k > 1 else 0.0
-    
     for combo in itertools.combinations(assets, k):
+        # Filtro correlazione
         current_corr = get_avg_correlation(data, combo)
         
         if current_corr <= max_corr_threshold:
             subset = data[list(combo)].pct_change().dropna()
-            weights = optimize_portfolio(subset, min_weight=min_w)
+            weights = optimize_portfolio(subset)
             r, v, s, sort, mdd = get_advanced_stats(weights, subset)
             
             if s > best_sharpe:
@@ -251,25 +198,28 @@ st.title("🛡️ Asset Optimizer: Executive Dashboard")
 # SIDEBAR
 with st.sidebar:
     st.header("1. Data Feed")
-    uploaded_file = st.file_uploader("Carica CSV", type=["csv"])
-    
-    st.markdown("---")
-    fida_mode = st.checkbox("Format FIDA (Base 100/Undefined)", value=False, help="Attiva pulizia aggressiva per file grezzi.")
-    st.markdown("---")
-
+    uploaded_file = st.file_uploader("Carica CSV (basketai.csv)", type=["csv"])
     manual_placeholder = st.empty()
     
     st.divider()
     st.header("3. Filtri Strategici")
-    max_corr_input = st.slider("Max Correlazione Ammessa", 0.0, 1.0, 1.0, 0.05)
+    st.markdown("Definisci il compromesso accettabile:")
+    max_corr_input = st.slider(
+        "Max Correlazione Ammessa", 
+        min_value=0.0, 
+        max_value=1.0, 
+        value=1.0, 
+        step=0.05
+    )
 
 if uploaded_file is not None:
-    df, debug_info = load_data(uploaded_file, fida_mode=fida_mode)
+    df = load_data(uploaded_file)
     
     if df is not None and not df.empty:
         assets = df.columns.tolist()
         
-        with st.spinner('Calcolo Ottimizzazione...'):
+        with st.spinner('Calcolo Ottimizzazione e Analisi Metodologica...'):
+            # 1. Best Single Asset
             temp_sharpes = {}
             for a in assets:
                 r_t = df[[a]].pct_change().dropna()
@@ -278,28 +228,35 @@ if uploaded_file is not None:
             
             best_single = max(temp_sharpes, key=temp_sharpes.get)
             
+            # UI Manuale
             default_idx = assets.index(best_single)
             manual_asset = manual_placeholder.selectbox("2. Linea 1 (Manuale)", assets, index=default_idx)
             
+            # Dati Linea 1
             l1_ret_frame = df[[manual_asset]].pct_change().dropna()
             l1_stats = get_advanced_stats([1], l1_ret_frame)
             l1_corr = 1.0
             
+            # 2. Best Pair Optimized
             pair_assets, pair_weights, pair_stats = find_best_optimized_combination(df, 2, max_corr_input)
             if pair_assets:
                 l2_corr = get_avg_correlation(df, pair_assets)
                 l2_series = df[list(pair_assets)].pct_change().dropna().dot(pair_weights)
             
+            # 3. Best Triplet Optimized
             triplet_assets, triplet_weights, triplet_stats = find_best_optimized_combination(df, 3, max_corr_input)
             if triplet_assets:
                 l3_corr = get_avg_correlation(df, triplet_assets)
                 l3_series = df[list(triplet_assets)].pct_change().dropna().dot(triplet_weights)
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["1️⃣ DASHBOARD", "2️⃣ CORRELAZIONI", "3️⃣ BACKTEST", "📘 METODOLOGIA", "🔍 DATA CHECK"])
+        # --- TABS ---
+        tab1, tab2, tab3, tab4 = st.tabs(["1️⃣ DASHBOARD", "2️⃣ CORRELAZIONI", "3️⃣ BACKTEST", "📘 METODOLOGIA"])
 
+        # --- TAB 1: DASHBOARD ---
         with tab1:
             st.subheader("Allocazione Ottimale (Vincolata)")
-            if max_corr_input < 1.0: st.info(f"💡 Filtro Attivo: Combinazioni limitate a correlazione < {max_corr_input}.")
+            if max_corr_input < 1.0:
+                st.info(f"💡 Filtro Attivo: Combinazioni limitate a correlazione < {max_corr_input}.")
             
             table_data = []
             def make_row(label, asset_list, weights, corr, stats):
@@ -324,7 +281,10 @@ if uploaded_file is not None:
             st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
             
             st.divider()
+            st.markdown("### 📊 Performance vs Rischio")
             col1, col2, col3 = st.columns(3)
+            
+            # STILE CSS AGGIORNATO PER LIGHT MODE (Carte con ombra leggera)
             box_style = """
             <div style='background-color: #FFFFFF; padding: 20px; border-radius: 10px; border: 1px solid #E0E0E0; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center;'>
                 <h4 style='color: #666666; margin:0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;'>{title}</h4>
@@ -346,76 +306,85 @@ if uploaded_file is not None:
             if pair_assets: render_box(col2, "LINEA 2", "#1C83E1", pair_stats)
             if triplet_assets: render_box(col3, "LINEA 3", "#00C853", triplet_stats)
 
+        # --- TAB 2: CORRELAZIONI ---
         with tab2:
-            st.subheader("Matrice di Correlazione")
+            st.subheader("1. Asset Selezionati")
             unique_assets = list(set([manual_asset] + list(pair_assets or []) + list(triplet_assets or [])))
             clean_labels = {a: clean_asset_name(a) for a in unique_assets}
+            # Template Plotly White
             fig_corr = px.imshow(df[unique_assets].rename(columns=clean_labels).corr(), text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, template='plotly_white')
             st.plotly_chart(fig_corr, use_container_width=True)
 
+            st.markdown("---")
+            st.subheader("2. Intero Paniere")
+            all_clean = {a: clean_asset_name(a) for a in assets}
+            # Template Plotly White
+            fig_full = px.imshow(df.rename(columns=all_clean).corr(), text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, template='plotly_white')
+            fig_full.update_layout(height=600 if len(assets) < 15 else 900)
+            st.plotly_chart(fig_full, use_container_width=True)
+
+        # --- TAB 3: BACKTEST ---
         with tab3:
-            st.subheader("Simulazione Storica (Base 100)")
-            # 1. Definizione Indice Comune
+            st.subheader("Simulazione Storica (Equity Line)")
             common_idx = l1_ret_frame.index
             if pair_assets: common_idx = common_idx.intersection(l2_series.index)
             if triplet_assets: common_idx = common_idx.intersection(l3_series.index)
             
-            # 2. FORCE UNIQUE
-            common_idx = common_idx.unique()
-
-            # 3. Costruzione DataFrame
             chart_df = pd.DataFrame(index=common_idx)
+            chart_df[f"L1: {clean_asset_name(manual_asset)}"] = (1 + l1_ret_frame.loc[common_idx][manual_asset]).cumprod() * 100
+            if pair_assets: chart_df["L2: Best Pair"] = (1 + l2_series.loc[common_idx]).cumprod() * 100
+            if triplet_assets: chart_df["L3: Best Triplet"] = (1 + l3_series.loc[common_idx]).cumprod() * 100
             
-            # 4. Assegnazione Sicura
-            try:
-                chart_df[f"L1: {clean_asset_name(manual_asset)}"] = (1 + l1_ret_frame.loc[common_idx][manual_asset]).cumprod() * 100
-                if pair_assets: 
-                    chart_df["L2: Best Pair"] = (1 + l2_series.reindex(common_idx)).cumprod() * 100
-                if triplet_assets: 
-                    chart_df["L3: Best Triplet"] = (1 + l3_series.reindex(common_idx)).cumprod() * 100
-                
-                fig = px.line(chart_df, x=chart_df.index, y=chart_df.columns, template='plotly_white')
-                fig.update_layout(xaxis_title=None, yaxis_title="Valore", legend=dict(orientation="h", y=1.1, title=None))
-                st.plotly_chart(fig, use_container_width=True)
-            except Exception as e:
-                st.error(f"Errore generazione grafico: {e}")
+            # Template Plotly White + Legenda NERA (Default)
+            fig = px.line(chart_df, x=chart_df.index, y=chart_df.columns, template='plotly_white')
+            fig.update_layout(
+                xaxis_title=None, 
+                yaxis_title="Valore (Base 100)", 
+                legend=dict(
+                    orientation="h", 
+                    y=1.1, 
+                    title=None
+                    # Non forziamo più il colore bianco, plotly_white usa il nero di default
+                )
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
+        # --- TAB 4: METODOLOGIA ---
         with tab4:
-            st.markdown("### Metodologia\nIl modello usa ottimizzazione SLSQP su serie storiche settimanali.")
-        
-        with tab5:
-            st.subheader("🔍 Ispezione Dati e Validazione")
+            st.subheader("📘 Logica di Funzionamento del Modello")
             
-            # Metriche di Range
-            col_m1, col_m2, col_m3 = st.columns(3)
-            col_m1.metric("Data Inizio", df.index.min().strftime('%d/%m/%Y'))
-            col_m2.metric("Data Fine", df.index.max().strftime('%d/%m/%Y'))
-            col_m3.metric("Totale Settimane", len(df))
-
-            st.divider()
+            st.markdown("""
+            ### 1. Come vengono scelti gli asset?
+            Il programma non "sceglie" in base a simpatie o trend. Usa un approccio puramente matematico basato sulla **Modern Portfolio Theory (MPT)**.
             
-            col_d1, col_d2, col_d3 = st.columns(3)
-            col_d1.metric("Righe Originali (Raw)", debug_info["raw_rows"])
-            col_d2.metric("Righe Recuperate (Forward Fill)", debug_info["clean_rows"])
-            col_d3.metric("Righe Perse", debug_info["dropped"], delta_color="inverse")
+            * **Obiettivo Primario:** Massimizzare lo **Sharpe Ratio**.
+            * **Cosa significa:** Il software cerca la combinazione di asset e pesi che ha storicamente generato il **massimo rendimento per ogni unità di rischio** assunta. Non cerca il rendimento massimo assoluto (che spesso nasconde rischi folli), ma l'efficienza.
             
-            st.markdown("*Nota: Le righe perse sono spesso date vuote a fine file o righe totalmente corrotte.*")
+            ### 2. Come vengono calcolati i pesi? (Algoritmo SLSQP)
+            Utilizziamo un ottimizzatore non lineare (`Sequential Least Squares Programming`) che testa migliaia di combinazioni di percentuali per rispondere a questa domanda:
+            > *"Qual è la dose esatta di Asset A e Asset B che, miscelata insieme, rende la curva dei rendimenti più stabile possibile e inclinata verso l'alto?"*
             
-            st.divider()
-            st.markdown("#### ✅ Input vs Engine (Testa e Coda)")
+            ### 3. I Filtri Strategici
+            Se hai attivato il filtro **"Max Correlazione"** nella barra laterale, il modello applica una censura preventiva:
+            1.  Analizza tutte le possibili coppie/terne.
+            2.  **SCARTA** immediatamente quelle che si muovono troppo insieme (correlazione > soglia).
+            3.  Solo tra le sopravvissute (quelle diversificate), cerca la più efficiente.
             
-            col_show1, col_show2 = st.columns(2)
-            with col_show1:
-                st.markdown("**1. PRIME 5 SETTIMANE (2021)**")
-                st.dataframe(df.head(5), use_container_width=True)
-            with col_show2:
-                st.markdown("**2. ULTIME 5 SETTIMANE (2025/2026)**")
-                st.dataframe(df.tail(5), use_container_width=True)
+            ---
             
-            if df.select_dtypes(include=[np.number]).empty:
-                st.error("ERRORE GRAVE: Il dataframe non contiene numeri.")
+            ### 4. Glossario Brutale (Per non mentire a se stessi)
+            
+            | Metrica | Cosa ti dice (Traduzione Onesta) |
+            | :--- | :--- |
+            | **Sharpe Ratio** | Il voto in pagella del portafoglio. Sopra 1.0 è buono, sopra 2.0 è eccellente. Sotto 0.5 stai rischiando per nulla. |
+            | **Max Drawdown** | **Il dolore.** La percentuale massima che avresti perso dai massimi se avessi comprato nel momento peggiore e venduto nel momento peggiore. Se vedi -30% e non sei disposto a perdere 1/3 del capitale, lascia stare. |
+            | **Sortino Ratio** | Come lo Sharpe, ma ignora la volatilità "buona" (quando il titolo sale). È un giudice più severo e preciso per gli investitori avversi alle perdite. |
+            | **Correlazione** | **0.0 - 0.5:** Diversificazione reale (sicurezza). <br> **0.7 - 1.0:** Falsa diversificazione (se cade uno, cade anche l'altro). |
+            
+            ⚠️ **DISCLAIMER:** *Questo modello soffre di "Look-Ahead Bias". Ha ottimizzato i pesi guardando i dati del passato. Il futuro non sarà identico. Usa questi risultati come indicazione di potenziale strutturale, non come garanzia di profitto.*
+            """)
 
     else:
-        st.error("File vuoto o tutti i dati sono stati scartati durante la pulizia. Controlla il CSV.")
+        st.error("File non valido.")
 else:
     st.info("Carica il file CSV.")
