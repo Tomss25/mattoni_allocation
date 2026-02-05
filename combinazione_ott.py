@@ -97,58 +97,67 @@ st.markdown("""
 
 def load_data(file, fida_mode=False):
     """
-    Caricamento dati.
+    Caricamento dati con GESTIONE DUPLICATI "NUCLEAR" (Groupby Last).
     Restituisce una tupla: (DataFrame Pulito, Info Debug)
     """
-    debug_info = {"raw_rows": 0, "clean_rows": 0, "dropped": 0}
+    debug_info = {"raw_rows": 0, "clean_rows": 0, "dropped": 0, "duplicates_dropped": 0}
     
-    if fida_mode:
-        try:
-            # 1. Caricamento come stringa per gestire 'undefined'
+    try:
+        # 1. Caricamento Iniziale
+        if fida_mode:
+            # Caricamento come stringa per gestire 'undefined'
             df = pd.read_csv(file, sep=';', dtype=str)
-            debug_info["raw_rows"] = len(df)
-            df.columns = df.columns.str.strip()
+        else:
+            # Caricamento standard ma senza parsing date automatico subito
+            df = pd.read_csv(file, sep=';', decimal=',')
             
-            # 2. Pulizia Colonne (eccetto Data)
+        debug_info["raw_rows"] = len(df)
+        df.columns = df.columns.str.strip()
+        
+        # 2. Pulizia Colonne e Formato Numerico
+        if fida_mode:
             for col in df.columns:
                 if col != 'Data':
-                    # Rimuove undefined, cambia virgola in punto
                     df[col] = df[col].astype(str).str.strip()\
                                      .str.replace('undefined', 'NaN', case=False)\
                                      .str.replace(',', '.')
-                    # Converte in numero
                     df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # 3. Gestione Data
-            df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
-            df.set_index('Data', inplace=True)
-            
-            # 4. Drop NaN (Sincronizzazione serie)
-            df_clean = df.dropna()
-            debug_info["clean_rows"] = len(df_clean)
-            debug_info["dropped"] = debug_info["raw_rows"] - debug_info["clean_rows"]
-            
-            return df_clean, debug_info
-            
-        except Exception as e:
-            st.error(f"Errore lettura FIDA: {e}")
-            return None, debug_info
-    else:
-        # --- LOGICA ORIGINALE (INTATTA) ---
-        try:
-            df = pd.read_csv(file, sep=';', decimal=',', index_col=0, parse_dates=True, dayfirst=True)
-            debug_info["raw_rows"] = len(df)
-            df.columns = df.columns.str.strip()
-            for col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            df_clean = df.dropna()
-            debug_info["clean_rows"] = len(df_clean)
-            debug_info["dropped"] = debug_info["raw_rows"] - debug_info["clean_rows"]
-            
-            return df_clean, debug_info
-        except Exception as e:
-            return None, debug_info
+        else:
+             # Assicuro che tutto sia numerico anche in modalità standard
+             for col in df.columns:
+                if col != 'Data' and df[col].dtype == object:
+                     df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce')
+
+        # 3. Gestione Data (Critica)
+        df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
+        
+        # Rimuovo righe con data NaT (non valide)
+        df = df.dropna(subset=['Data'])
+        df.set_index('Data', inplace=True)
+        
+        # 4. FIX DUPLICATI "NUCLEAR" (Groupby)
+        # Se ci sono date duplicate, raggruppo per data e prendo l'ultimo valore.
+        # Questo garantisce matematicamente l'unicità dell'indice.
+        initial_count = len(df)
+        df = df.groupby(level=0).last()
+        final_count = len(df)
+        
+        if initial_count > final_count:
+            debug_info["duplicates_dropped"] = initial_count - final_count
+        
+        # Ordino l'indice per sicurezza temporale
+        df = df.sort_index()
+
+        # 5. Drop NaN (Sincronizzazione serie)
+        df_clean = df.dropna()
+        debug_info["clean_rows"] = len(df_clean)
+        debug_info["dropped"] = debug_info["raw_rows"] - debug_info["clean_rows"]
+        
+        return df_clean, debug_info
+        
+    except Exception as e:
+        st.error(f"Errore lettura file: {e}")
+        return None, debug_info
 
 def clean_asset_name(name):
     """Rimuove il rumore dal nome dell'asset."""
@@ -156,7 +165,6 @@ def clean_asset_name(name):
     return clean.strip()
 
 def get_advanced_stats(weights, returns):
-    """Calcola metriche avanzate: Rendimento, Volatilità, Sharpe, Sortino, MDD."""
     weights = np.array(weights)
     port_series = returns.dot(weights)
     
@@ -184,10 +192,6 @@ def get_avg_correlation(data, assets):
     return values.mean()
 
 def optimize_portfolio(returns, min_weight=0.0):
-    """
-    Ottimizza i pesi del portafoglio per massimizzare lo Sharpe Ratio.
-    Parametro 'min_weight': impone una percentuale minima per asset.
-    """
     n_assets = len(returns.columns)
     
     def objective(weights):
@@ -214,11 +218,9 @@ def find_best_optimized_combination(data, k, max_corr_threshold=1.0):
     best_weights = None
     best_full_stats = None
     
-    # Se cerchiamo più di 1 asset, forziamo una presenza minima dell'1%
     min_w = 0.01 if k > 1 else 0.0
     
     for combo in itertools.combinations(assets, k):
-        # Filtro correlazione
         current_corr = get_avg_correlation(data, combo)
         
         if current_corr <= max_corr_threshold:
@@ -252,34 +254,23 @@ with st.sidebar:
     st.header("1. Data Feed")
     uploaded_file = st.file_uploader("Carica CSV", type=["csv"])
     
-    # --- PULSANTE FIDA ---
     st.markdown("---")
     fida_mode = st.checkbox("Format FIDA (Base 100/Undefined)", value=False, help="Attiva pulizia aggressiva per file grezzi.")
     st.markdown("---")
-    # ---------------------------
 
     manual_placeholder = st.empty()
     
     st.divider()
     st.header("3. Filtri Strategici")
-    st.markdown("Definisci il compromesso accettabile:")
-    max_corr_input = st.slider(
-        "Max Correlazione Ammessa", 
-        min_value=0.0, 
-        max_value=1.0, 
-        value=1.0, 
-        step=0.05
-    )
+    max_corr_input = st.slider("Max Correlazione Ammessa", 0.0, 1.0, 1.0, 0.05)
 
 if uploaded_file is not None:
-    # PASSAGGIO DEL PARAMETRO FIDA_MODE
     df, debug_info = load_data(uploaded_file, fida_mode=fida_mode)
     
     if df is not None and not df.empty:
         assets = df.columns.tolist()
         
         with st.spinner('Calcolo Ottimizzazione...'):
-            # 1. Best Single Asset
             temp_sharpes = {}
             for a in assets:
                 r_t = df[[a]].pct_change().dropna()
@@ -288,35 +279,28 @@ if uploaded_file is not None:
             
             best_single = max(temp_sharpes, key=temp_sharpes.get)
             
-            # UI Manuale
             default_idx = assets.index(best_single)
             manual_asset = manual_placeholder.selectbox("2. Linea 1 (Manuale)", assets, index=default_idx)
             
-            # Dati Linea 1
             l1_ret_frame = df[[manual_asset]].pct_change().dropna()
             l1_stats = get_advanced_stats([1], l1_ret_frame)
             l1_corr = 1.0
             
-            # 2. Best Pair Optimized
             pair_assets, pair_weights, pair_stats = find_best_optimized_combination(df, 2, max_corr_input)
             if pair_assets:
                 l2_corr = get_avg_correlation(df, pair_assets)
                 l2_series = df[list(pair_assets)].pct_change().dropna().dot(pair_weights)
             
-            # 3. Best Triplet Optimized
             triplet_assets, triplet_weights, triplet_stats = find_best_optimized_combination(df, 3, max_corr_input)
             if triplet_assets:
                 l3_corr = get_avg_correlation(df, triplet_assets)
                 l3_series = df[list(triplet_assets)].pct_change().dropna().dot(triplet_weights)
 
-        # --- TABS (AGGIUNTA TAB DATA CHECK) ---
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["1️⃣ DASHBOARD", "2️⃣ CORRELAZIONI", "3️⃣ BACKTEST", "📘 METODOLOGIA", "🔍 DATA CHECK"])
 
-        # --- TAB 1: DASHBOARD ---
         with tab1:
             st.subheader("Allocazione Ottimale (Vincolata)")
-            if max_corr_input < 1.0:
-                st.info(f"💡 Filtro Attivo: Combinazioni limitate a correlazione < {max_corr_input}.")
+            if max_corr_input < 1.0: st.info(f"💡 Filtro Attivo: Combinazioni limitate a correlazione < {max_corr_input}.")
             
             table_data = []
             def make_row(label, asset_list, weights, corr, stats):
@@ -341,10 +325,7 @@ if uploaded_file is not None:
             st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
             
             st.divider()
-            st.markdown("### 📊 Performance vs Rischio")
             col1, col2, col3 = st.columns(3)
-            
-            # STILE CSS AGGIORNATO
             box_style = """
             <div style='background-color: #FFFFFF; padding: 20px; border-radius: 10px; border: 1px solid #E0E0E0; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center;'>
                 <h4 style='color: #666666; margin:0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;'>{title}</h4>
@@ -366,75 +347,9 @@ if uploaded_file is not None:
             if pair_assets: render_box(col2, "LINEA 2", "#1C83E1", pair_stats)
             if triplet_assets: render_box(col3, "LINEA 3", "#00C853", triplet_stats)
 
-        # --- TAB 2: CORRELAZIONI ---
         with tab2:
             st.subheader("Matrice di Correlazione")
             unique_assets = list(set([manual_asset] + list(pair_assets or []) + list(triplet_assets or [])))
             clean_labels = {a: clean_asset_name(a) for a in unique_assets}
             fig_corr = px.imshow(df[unique_assets].rename(columns=clean_labels).corr(), text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, template='plotly_white')
-            st.plotly_chart(fig_corr, use_container_width=True)
-
-        # --- TAB 3: BACKTEST ---
-        with tab3:
-            st.subheader("Simulazione Storica (Base 100)")
-            common_idx = l1_ret_frame.index
-            if pair_assets: common_idx = common_idx.intersection(l2_series.index)
-            if triplet_assets: common_idx = common_idx.intersection(l3_series.index)
-            
-            chart_df = pd.DataFrame(index=common_idx)
-            chart_df[f"L1: {clean_asset_name(manual_asset)}"] = (1 + l1_ret_frame.loc[common_idx][manual_asset]).cumprod() * 100
-            if pair_assets: chart_df["L2: Best Pair"] = (1 + l2_series.loc[common_idx]).cumprod() * 100
-            if triplet_assets: chart_df["L3: Best Triplet"] = (1 + l3_series.loc[common_idx]).cumprod() * 100
-            
-            fig = px.line(chart_df, x=chart_df.index, y=chart_df.columns, template='plotly_white')
-            fig.update_layout(xaxis_title=None, yaxis_title="Valore", legend=dict(orientation="h", y=1.1, title=None))
-            st.plotly_chart(fig, use_container_width=True)
-
-        # --- TAB 4: METODOLOGIA ---
-        with tab4:
-            st.markdown("### Metodologia\nIl modello usa ottimizzazione SLSQP su serie storiche settimanali.")
-        
-        # --- TAB 5: DATA CHECK (POTENZIATO) ---
-        with tab5:
-            st.subheader("🔍 Ispezione Dati e Validazione")
-            
-            # 1. Report Pulizia
-            col_d1, col_d2, col_d3 = st.columns(3)
-            col_d1.metric("Righe Originali", debug_info["raw_rows"])
-            col_d2.metric("Righe Pulite (Usate)", debug_info["clean_rows"])
-            col_d3.metric("Righe Scartate (Errori)", debug_info["dropped"], delta_color="inverse")
-            
-            if debug_info["dropped"] > 0:
-                st.warning(f"⚠️ Attenzione: {debug_info['dropped']} righe sono state eliminate perché contenevano errori ('undefined') o dati mancanti. Questo riduce la profondità storica.")
-            
-            st.divider()
-            
-            # 2. CONFRONTO: PREZZI vs VARIAZIONI
-            st.markdown("#### ✅ Prova di Conversione: Input (Prezzi) vs Engine (Variazioni)")
-            st.markdown("Qui sotto vedi come il programma trasforma i tuoi dati Base 100 in Variazioni Percentuali usate per il calcolo.")
-            
-            # Calcolo variazioni per visualizzazione
-            df_returns = df.pct_change().dropna().tail(10) * 100 # Ultime 10 settimane, in %
-            df_prices = df.tail(10) # Ultimi 10 prezzi
-            
-            col_show1, col_show2 = st.columns(2)
-            
-            with col_show1:
-                st.markdown("**1. INPUT PULITO (Prezzi/Indici)**")
-                st.markdown("Questi sono i dati caricati e puliti.")
-                st.dataframe(df_prices, use_container_width=True)
-            
-            with col_show2:
-                st.markdown("**2. ENGINE (Variazioni Settimanali %)**")
-                st.markdown("Questi sono i numeri che il modello ottimizza.")
-                # FIX: Rimosso background_gradient che richiede matplotlib
-                st.dataframe(df_returns.style.format("{:.4f}%"), use_container_width=True)
-            
-            # Check Validità Dati
-            if df.select_dtypes(include=[np.number]).empty:
-                st.error("ERRORE GRAVE: Il dataframe non contiene numeri! La conversione 'Virgola -> Punto' potrebbe essere fallita.")
-
-    else:
-        st.error("File vuoto o tutti i dati sono stati scartati durante la pulizia. Controlla il CSV.")
-else:
-    st.info("Carica il file CSV.")
+            st.
