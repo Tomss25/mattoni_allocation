@@ -96,15 +96,45 @@ st.markdown("""
 # --- MOTORE MATEMATICO ---
 
 def load_data(file):
-    """Caricamento robusto (Sep=; Dec=, Thousands=., Date=GG/MM/AAAA)."""
+    """
+    Caricamento intelligente:
+    1. Cerca automaticamente la colonna Date/Data.
+    2. Gestisce separatori di migliaia (.).
+    3. Rimuove colonne vuote o 'Unnamed' generate da errori di formattazione.
+    """
     try:
-        # CORREZIONE APPLICATA QUI: aggiunto thousands='.'
-        df = pd.read_csv(file, sep=';', decimal=',', thousands='.', index_col=0, parse_dates=True, dayfirst=True)
+        # 1. Leggi tutto senza indice per ispezionare le colonne
+        df = pd.read_csv(file, sep=';', decimal=',', thousands='.')
+        
+        # 2. Cerca la colonna data (case insensitive)
+        date_col = None
+        for col in df.columns:
+            if 'date' in col.lower() or 'data' in col.lower():
+                date_col = col
+                break
+        
+        if not date_col:
+            st.error("Nessuna colonna 'Date' o 'Data' trovata nel CSV.")
+            return None
+
+        # 3. Imposta indice e pulisci
+        df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors='coerce')
+        df.set_index(date_col, inplace=True)
+        
+        # Rimuovi colonne che iniziano con 'Unnamed' (colonne vuote/sporche)
+        df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+        
+        # Pulisci nomi colonne
         df.columns = df.columns.str.strip()
+        
+        # Converti a numeri
         for col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
+            
         return df.dropna()
+        
     except Exception as e:
+        st.error(f"Errore di lettura: {e}")
         return None
 
 def clean_asset_name(name):
@@ -259,6 +289,7 @@ if uploaded_file is not None:
             if max_corr_input < 1.0:
                 st.info(f"💡 Filtro Attivo: Combinazioni limitate a correlazione < {max_corr_input}.")
             
+            # Tabella Riepilogativa (Performance)
             table_data = []
             def make_row(label, asset_list, weights, corr, stats):
                 r, v, s, sort, mdd = stats
@@ -266,12 +297,11 @@ if uploaded_file is not None:
                 else: comp_str = format_composition(asset_list, weights)
                 return {
                     "Strategia": label,
-                    "Allocazione (Pesi Ottimali)": comp_str,
+                    "Allocazione Sintetica": comp_str,
                     "Corr. Media": f"{corr:.2f}" if isinstance(corr, float) else "N/A",
                     "Rend. Annuo": f"{r*100:.1f}%",
                     "Max DD": f"{mdd*100:.1f}%",
                     "Sharpe": f"{s:.2f}",
-                    "Sortino": f"{sort:.2f}"
                 }
             
             table_data.append(make_row("LINEA 1 (Manuale)", manual_asset, [1], l1_corr, l1_stats))
@@ -281,6 +311,48 @@ if uploaded_file is not None:
             
             st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
             
+            # --- SEZIONE AGGIUNTA: DETTAGLIO COMPOSIZIONE (Line/Name/ISIN/Weight) ---
+            st.divider()
+            st.subheader("📍 Dettaglio Composizione (Struttura Portafogli)")
+            
+            comp_rows = []
+            
+            # Linea 1 (Singola)
+            comp_rows.append({
+                "Linea": "LINEA 1", 
+                "Nome Asset": clean_asset_name(manual_asset), 
+                "ISIN": "-", # Placeholder (Dati mancanti nel CSV)
+                "Peso %": "100%"
+            })
+            
+            # Linea 2 (Coppia)
+            if pair_assets:
+                sorted_pair = sorted(zip(pair_assets, pair_weights), key=lambda x: x[1], reverse=True)
+                for a, w in sorted_pair:
+                    if w > 0.001: # Mostra solo se peso > 0.1%
+                        comp_rows.append({
+                            "Linea": "LINEA 2", 
+                            "Nome Asset": clean_asset_name(a), 
+                            "ISIN": "-", 
+                            "Peso %": f"{w*100:.1f}%"
+                        })
+            
+            # Linea 3 (Tripletta)
+            if triplet_assets:
+                sorted_triplet = sorted(zip(triplet_assets, triplet_weights), key=lambda x: x[1], reverse=True)
+                for a, w in sorted_triplet:
+                    if w > 0.001:
+                        comp_rows.append({
+                            "Linea": "LINEA 3", 
+                            "Nome Asset": clean_asset_name(a), 
+                            "ISIN": "-", 
+                            "Peso %": f"{w*100:.1f}%"
+                        })
+            
+            # Visualizzazione Tabella Dettaglio
+            st.dataframe(pd.DataFrame(comp_rows), hide_index=True, use_container_width=True)
+            # -----------------------------------------------------------------------
+
             st.divider()
             st.markdown("### 📊 Performance vs Rischio")
             col1, col2, col3 = st.columns(3)
@@ -345,7 +417,6 @@ if uploaded_file is not None:
                     orientation="h", 
                     y=1.1, 
                     title=None
-                    # Non forziamo più il colore bianco, plotly_white usa il nero di default
                 )
             )
             st.plotly_chart(fig, use_container_width=True)
