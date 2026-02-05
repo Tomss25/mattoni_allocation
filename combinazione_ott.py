@@ -3,75 +3,129 @@ import pandas as pd
 import numpy as np
 import itertools
 import plotly.express as px
-import plotly.graph_objects as go
 import re
 from scipy.optimize import minimize
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="Asset Allocation: Executive Pro", layout="wide")
+st.set_page_config(page_title="Asset Allocation: Light Executive", layout="wide")
 
-# --- STYLING CSS (EXECUTIVE STYLE) ---
+# --- STYLING CSS AVANZATO (LIGHT MODE - EXECUTIVE STYLE) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #FFFFFF; color: #31333F; }
-    [data-testid="stSidebar"] { background-color: #F8F9FA; border-right: 1px solid #E0E0E0; }
-    h1, h2, h3, h4, h5, h6 { color: #000000 !important; font-family: 'Segoe UI', sans-serif; font-weight: 700; }
-    
-    /* Metriche In-Sample vs Out-of-Sample */
-    .metric-box {
-        padding: 15px; border-radius: 8px; border: 1px solid #E0E0E0; margin-bottom: 10px; text-align: center;
+    /* Sfondo Principale - Bianco Pulito */
+    .stApp {
+        background-color: #FFFFFF;
+        color: #31333F;
     }
-    .metric-title { font-size: 12px; text-transform: uppercase; color: #666; letter-spacing: 1px; }
-    .metric-value { font-size: 24px; font-weight: 800; color: #333; }
-    .metric-sub { font-size: 12px; color: #888; }
     
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] { background-color: #FFFFFF; border-bottom: 1px solid #E0E0E0; }
-    .stTabs [aria-selected="true"] { border-top: 3px solid #FF4B4B; color: #000 !important; background-color: #F0F2F6; }
+    /* Sidebar - Grigio Tenue Professionale */
+    [data-testid="stSidebar"] {
+        background-color: #F8F9FA;
+        border-right: 1px solid #E0E0E0;
+    }
+    
+    /* Testi e Header - Nero/Grigio Scuro per massimo contrasto */
+    h1, h2, h3, h4, h5, h6 {
+        color: #000000 !important;
+        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+    }
+    
+    p, div, label, li {
+        color: #31333F;
+    }
+    
+    /* --- CUSTOMIZZAZIONE SELECTBOX (Sidebar) --- */
+    .stSelectbox label p {
+        color: #000000 !important; /* Label nera */
+        font-weight: bold;
+    }
+    div[data-baseweb="select"] > div {
+        background-color: #FFFFFF !important;
+        color: #000000 !important;
+        border: 1px solid #CCCCCC !important;
+    }
+    
+    /* Tabelle (DataFrame) - Stile Excel Pulito */
+    .stDataFrame {
+        border: 1px solid #E0E0E0;
+    }
+    [data-testid="stDataFrameResizable"] {
+        background-color: #FFFFFF;
+    }
+    
+    /* Tabs - Stile Moderno Chiaro */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        background-color: #FFFFFF;
+        border-bottom: 1px solid #E0E0E0;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #FFFFFF;
+        border-radius: 4px 4px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        color: #666666;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #F0F2F6 !important;
+        color: #000000 !important;
+        border-top: 3px solid #FF4B4B; /* Highlight Rosso Streamlit o Blu Corporate */
+        border-bottom: 1px solid #F0F2F6;
+    }
+
+    /* Divisori */
+    hr {
+        border-color: #E0E0E0;
+    }
+    
+    /* Messaggi di Alert */
+    .stAlert {
+        background-color: #F0F2F6;
+        color: #31333F;
+        border: 1px solid #D1D1D1;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # --- MOTORE MATEMATICO ---
 
 def load_data(file):
-    """
-    Caricamento robusto con gestione separatore migliaia.
-    """
+    """Caricamento robusto (Sep=; Dec=, Thousands=., Date=GG/MM/AAAA)."""
     try:
-        # FIX: thousands='.' è fondamentale per numeri tipo 1.716,94
+        # CORREZIONE APPLICATA QUI: aggiunto thousands='.'
         df = pd.read_csv(file, sep=';', decimal=',', thousands='.', index_col=0, parse_dates=True, dayfirst=True)
         df.columns = df.columns.str.strip()
-        # Conversione forzata a numerico
         for col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
         return df.dropna()
     except Exception as e:
-        st.error(f"Errore tecnico nel caricamento: {e}")
         return None
 
-def detect_frequency(df):
-    """Rileva automaticamente la frequenza dei dati per annualizzare correttamente."""
-    if len(df) < 2: return 52
-    days = (df.index[1] - df.index[0]).days
-    if days <= 4: return 252 # Giornaliero
-    if days <= 10: return 52 # Settimanale
-    if days <= 35: return 12 # Mensile
-    return 52 # Default
+def clean_asset_name(name):
+    """Rimuove il rumore dal nome dell'asset."""
+    clean = re.sub(r'\s*\(.*\)', '', name)
+    return clean.strip()
 
-def get_advanced_stats(weights, returns, freq, rf_rate=0.0):
-    """Calcola metriche considerando il Risk Free Rate."""
+def get_advanced_stats(weights, returns):
+    """Calcola metriche avanzate: Rendimento, Volatilità, Sharpe, Sortino, MDD."""
     weights = np.array(weights)
     port_series = returns.dot(weights)
     
-    mean_ret = port_series.mean() * freq
-    volatility = port_series.std() * np.sqrt(freq)
+    annual_factor = 52
+    mean_ret = port_series.mean() * annual_factor
+    volatility = port_series.std() * np.sqrt(annual_factor)
     
-    # Sharpe con Risk Free
-    sharpe = (mean_ret - rf_rate) / volatility if volatility != 0 else 0
+    sharpe = mean_ret / volatility if volatility != 0 else 0
     
     negative_returns = port_series[port_series < 0]
-    downside_std = negative_returns.std() * np.sqrt(freq)
-    sortino = (mean_ret - rf_rate) / downside_std if downside_std != 0 else 0
+    downside_std = negative_returns.std() * np.sqrt(annual_factor)
+    sortino = mean_ret / downside_std if downside_std != 0 else 0
     
     cumulative = (1 + port_series).cumprod()
     peak = cumulative.cummax()
@@ -86,230 +140,252 @@ def get_avg_correlation(data, assets):
     values = corr_matrix.values[np.triu_indices_from(corr_matrix, k=1)]
     return values.mean()
 
-def optimize_portfolio(returns, freq, rf_rate=0.0):
+def optimize_portfolio(returns):
     n_assets = len(returns.columns)
-    cov_matrix = returns.cov() * freq
-    avg_returns = returns.mean() * freq
-    
     def objective(weights):
         w = np.array(weights)
-        port_ret = np.sum(avg_returns * w)
-        port_vol = np.sqrt(np.dot(w.T, np.dot(cov_matrix, w)))
-        # Minimizziamo il Negative Sharpe
-        s = (port_ret - rf_rate) / port_vol if port_vol > 0 else 0
+        ret = np.sum(returns.mean() * w) * 52
+        vol = np.sqrt(np.dot(w.T, np.dot(returns.cov() * 52, w)))
+        s = ret / vol if vol > 0 else 0
         return -s
 
     constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-    bounds = tuple((0.0, 1.0) for _ in range(n_assets))
-    init_guess = [1./n_assets] * n_assets
+    bounds = tuple((0, 1) for _ in range(n_assets))
+    init_guess = [1./n_assets for _ in range(n_assets)]
     
-    try:
-        result = minimize(objective, init_guess, method='SLSQP', bounds=bounds, constraints=constraints)
-        return result.x
-    except:
-        return init_guess
+    result = minimize(objective, init_guess, method='SLSQP', bounds=bounds, constraints=constraints)
+    return result.x
 
 @st.cache_data(show_spinner=False)
-def run_optimization_split(data, train_size, k, max_corr, rf_rate):
-    """
-    Ottimizza sul Train Set, Test sul Test Set.
-    Evita il Look-Ahead Bias.
-    """
-    split_idx = int(len(data) * train_size)
-    train_data = data.iloc[:split_idx]
-    
-    # Calcolo frequenza dinamica
-    freq = detect_frequency(data)
-    
+def find_best_optimized_combination(data, k, max_corr_threshold=1.0):
     assets = data.columns.tolist()
-    if len(assets) < k: return None, None, None, None
+    if len(assets) < k: return None, None, (0,0,0,0,0)
     
-    best_sharpe_train = -np.inf
+    best_sharpe = -np.inf
     best_combo = None
     best_weights = None
+    best_full_stats = None
     
-    # Brute force sulle combinazioni (limitato a k piccoli per performance)
     for combo in itertools.combinations(assets, k):
-        # Filtro Correlazione (calcolato sul Train)
-        current_corr = get_avg_correlation(train_data, combo)
+        # Filtro correlazione
+        current_corr = get_avg_correlation(data, combo)
         
-        if current_corr <= max_corr:
-            subset_train = train_data[list(combo)].pct_change().dropna()
+        if current_corr <= max_corr_threshold:
+            subset = data[list(combo)].pct_change().dropna()
+            weights = optimize_portfolio(subset)
+            r, v, s, sort, mdd = get_advanced_stats(weights, subset)
             
-            # Ottimizzazione (SOLO su Train)
-            weights = optimize_portfolio(subset_train, freq, rf_rate)
-            
-            # Valutazione (SOLO su Train per la selezione)
-            r, v, s, sort, mdd = get_advanced_stats(weights, subset_train, freq, rf_rate)
-            
-            if s > best_sharpe_train:
-                best_sharpe_train = s
+            if s > best_sharpe:
+                best_sharpe = s
                 best_combo = combo
                 best_weights = weights
-                
-    if best_combo:
-        # Ora calcoliamo le statistiche finali sia per Train che per Test
-        full_subset = data[list(best_combo)].pct_change().dropna()
-        
-        # Split dei rendimenti
-        split_point = int(len(full_subset) * train_size)
-        ret_train = full_subset.iloc[:split_point]
-        ret_test = full_subset.iloc[split_point:]
-        
-        stats_train = get_advanced_stats(best_weights, ret_train, freq, rf_rate)
-        
-        # Se il test set è troppo piccolo, gestiamo l'errore
-        if len(ret_test) > 1:
-            stats_test = get_advanced_stats(best_weights, ret_test, freq, rf_rate)
-        else:
-            stats_test = (0,0,0,0,0)
+                best_full_stats = (r, v, s, sort, mdd)
             
-        return best_combo, best_weights, stats_train, stats_test
-        
-    return None, None, None, None
+    return best_combo, best_weights, best_full_stats
 
-def clean_asset_name(name):
-    return re.sub(r'\s*\(.*\)', '', name).strip()
+def format_composition(assets, weights):
+    items = []
+    sorted_pairs = sorted(zip(assets, weights), key=lambda x: x[1], reverse=True)
+    for a, w in sorted_pairs:
+        if w > 0.001: 
+            clean_name = clean_asset_name(a)
+            items.append(f"{clean_name} ({w*100:.0f}%)")
+    return " + ".join(items)
 
 # --- UI APPLICAZIONE ---
 
-st.title("🛡️ Quant Allocation: Reality Check Edition")
+st.title("🛡️ Quant Allocation: 3-Tier Model")
 
+# SIDEBAR
 with st.sidebar:
-    st.header("1. Input Dati")
+    st.header("1. Data Feed")
     uploaded_file = st.file_uploader("Carica CSV (basketai.csv)", type=["csv"])
+    manual_placeholder = st.empty()
     
     st.divider()
-    st.header("2. Parametri Finanziari")
-    rf_input = st.number_input("Risk Free Rate (%)", value=3.0, step=0.1) / 100
-    train_split = st.slider("Train/Test Split (Backtest Onesto)", 0.5, 0.9, 0.7, help="Ottimizza sul primo X% dei dati, verifica sul restante.")
-    
-    st.divider()
-    st.header("3. Filtri")
-    max_corr_input = st.slider("Max Correlazione Ammessa", 0.0, 1.0, 0.85, step=0.05)
+    st.header("3. Filtri Strategici")
+    st.markdown("Definisci il compromesso accettabile:")
+    max_corr_input = st.slider(
+        "Max Correlazione Ammessa", 
+        min_value=0.0, 
+        max_value=1.0, 
+        value=1.0, 
+        step=0.05
+    )
 
-if uploaded_file:
+if uploaded_file is not None:
     df = load_data(uploaded_file)
     
     if df is not None and not df.empty:
-        freq = detect_frequency(df)
         assets = df.columns.tolist()
         
-        # Info Split
-        split_idx = int(len(df) * train_split)
-        split_date = df.index[split_idx].strftime('%d/%m/%Y')
-        
-        st.info(f"📊 Frequenza rilevata: {freq} periodi/anno. Split simulazione: {split_date}")
-        
-        with st.spinner('Esecuzione Ottimizzazione Walk-Forward...'):
-            # Manual
-            default_asset = assets[0]
-            manual_asset = st.selectbox("Benchmark / Asset Manuale", assets)
+        with st.spinner('Calcolo Ottimizzazione e Analisi Metodologica...'):
+            # 1. Best Single Asset
+            temp_sharpes = {}
+            for a in assets:
+                r_t = df[[a]].pct_change().dropna()
+                _, _, s_t, _, _ = get_advanced_stats([1], r_t)
+                temp_sharpes[a] = s_t
             
-            # Calcoli Manuale
-            man_ret = df[[manual_asset]].pct_change().dropna()
-            split_p = int(len(man_ret) * train_split)
-            man_train_stats = get_advanced_stats([1], man_ret.iloc[:split_p], freq, rf_input)
-            man_test_stats = get_advanced_stats([1], man_ret.iloc[split_p:], freq, rf_input)
+            best_single = max(temp_sharpes, key=temp_sharpes.get)
+            
+            # UI Manuale
+            default_idx = assets.index(best_single)
+            manual_asset = manual_placeholder.selectbox("2. Linea 1 (Manuale)", assets, index=default_idx)
+            
+            # Dati Linea 1
+            l1_ret_frame = df[[manual_asset]].pct_change().dropna()
+            l1_stats = get_advanced_stats([1], l1_ret_frame)
+            l1_corr = 1.0
+            
+            # 2. Best Pair Optimized
+            pair_assets, pair_weights, pair_stats = find_best_optimized_combination(df, 2, max_corr_input)
+            if pair_assets:
+                l2_corr = get_avg_correlation(df, pair_assets)
+                l2_series = df[list(pair_assets)].pct_change().dropna().dot(pair_weights)
+            
+            # 3. Best Triplet Optimized
+            triplet_assets, triplet_weights, triplet_stats = find_best_optimized_combination(df, 3, max_corr_input)
+            if triplet_assets:
+                l3_corr = get_avg_correlation(df, triplet_assets)
+                l3_series = df[list(triplet_assets)].pct_change().dropna().dot(triplet_weights)
 
-            # Calcoli Ottimizzati
-            l2_combo, l2_w, l2_train, l2_test = run_optimization_split(df, train_split, 2, max_corr_input, rf_input)
-            l3_combo, l3_w, l3_train, l3_test = run_optimization_split(df, train_split, 3, max_corr_input, rf_input)
+        # --- TABS ---
+        tab1, tab2, tab3, tab4 = st.tabs(["1️⃣ DASHBOARD", "2️⃣ CORRELAZIONI", "3️⃣ BACKTEST", "📘 METODOLOGIA"])
 
-        # --- VISUALIZZAZIONE ---
-        
-        tab1, tab2, tab3 = st.tabs(["📈 DASHBOARD", "📊 CORRELAZIONI", "📝 DETTAGLI"])
-        
+        # --- TAB 1: DASHBOARD ---
         with tab1:
-            st.subheader("Performance Reale vs Teorica")
-            st.caption("Nota: 'In-Sample' è il passato ottimizzato. 'Out-of-Sample' è la prova del nove (dati non visti dall'algoritmo).")
+            st.subheader("Allocazione Ottimale (Vincolata)")
+            if max_corr_input < 1.0:
+                st.info(f"💡 Filtro Attivo: Combinazioni limitate a correlazione < {max_corr_input}.")
             
-            # Helper per le card
-            def draw_card(title, color, train_stats, test_stats, components=None):
-                r_tr, v_tr, s_tr, _, _ = train_stats
-                r_te, v_te, s_te, _, mdd_te = test_stats
-                
-                # Composizione stringa
-                comp_html = ""
-                if components:
-                    comp_html = "<div style='font-size:11px; color:#555; margin-bottom:10px;'>" + " + ".join([f"{clean_asset_name(k)} <b>{v*100:.0f}%</b>" for k,v in components]) + "</div>"
-
-                html = f"""
-                <div style='background-color:#FFF; padding:15px; border-radius:10px; border-left: 5px solid {color}; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 20px;'>
-                    <h4 style='margin:0; font-size:16px;'>{title}</h4>
-                    {comp_html}
-                    <div style='display:flex; justify-content:space-between; margin-top:15px;'>
-                        <div style='text-align:center; width:48%; border-right:1px solid #eee;'>
-                            <div class='metric-title'>TRAIN (Ottimizzato)</div>
-                            <div class='metric-value' style='color:#888'>{s_tr:.2f}</div>
-                            <div class='metric-sub'>SR Ann.</div>
-                        </div>
-                        <div style='text-align:center; width:48%;'>
-                            <div class='metric-title'>TEST (Realtà)</div>
-                            <div class='metric-value' style='color:{color}'>{s_te:.2f}</div>
-                            <div class='metric-sub'>SR Ann.</div>
-                        </div>
-                    </div>
-                    <div style='margin-top:10px; font-size:13px; text-align:center; color:#333;'>
-                        Test Return: <b>{r_te*100:.1f}%</b> | Test DD: <b style='color:#D32F2F'>{mdd_te*100:.1f}%</b>
-                    </div>
-                </div>
-                """
-                st.markdown(html, unsafe_allow_html=True)
-
-            c1, c2, c3 = st.columns(3)
-            with c1: draw_card("LINEA 1 (Benchmark)", "#777", man_train_stats, man_test_stats)
-            with c2: 
-                if l2_combo: 
-                    comps = list(zip(l2_combo, l2_w))
-                    draw_card("LINEA 2 (Best Pair)", "#1C83E1", l2_train, l2_test, comps)
-                else: st.warning("Nessuna coppia trovata.")
-            with c3:
-                if l3_combo:
-                    comps = list(zip(l3_combo, l3_w))
-                    draw_card("LINEA 3 (Best Triplet)", "#00C853", l3_train, l3_test, comps)
-                else: st.warning("Nessuna tripla trovata.")
-
+            table_data = []
+            def make_row(label, asset_list, weights, corr, stats):
+                r, v, s, sort, mdd = stats
+                if isinstance(asset_list, str): comp_str = f"{clean_asset_name(asset_list)} (100%)"
+                else: comp_str = format_composition(asset_list, weights)
+                return {
+                    "Strategia": label,
+                    "Allocazione (Pesi Ottimali)": comp_str,
+                    "Corr. Media": f"{corr:.2f}" if isinstance(corr, float) else "N/A",
+                    "Rend. Annuo": f"{r*100:.1f}%",
+                    "Max DD": f"{mdd*100:.1f}%",
+                    "Sharpe": f"{s:.2f}",
+                    "Sortino": f"{sort:.2f}"
+                }
+            
+            table_data.append(make_row("LINEA 1 (Manuale)", manual_asset, [1], l1_corr, l1_stats))
+            if pair_assets: table_data.append(make_row("LINEA 2 (Best Pair)", pair_assets, pair_weights, l2_corr, pair_stats))
+            else: st.warning("Nessuna coppia trovata con i filtri attuali.")
+            if triplet_assets: table_data.append(make_row("LINEA 3 (Best Triplet)", triplet_assets, triplet_weights, l3_corr, triplet_stats))
+            
+            st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
+            
             st.divider()
+            st.markdown("### 📊 Performance vs Rischio")
+            col1, col2, col3 = st.columns(3)
             
-            # CHART EQUITY LINE
-            st.subheader("Simulazione Storica (Equity Line)")
-            
-            # Ricostruzione serie temporali
-            common_idx = df.index
-            chart_df = pd.DataFrame(index=common_idx)
-            
-            # Benchmark
-            bench_ret = df[manual_asset].pct_change().fillna(0)
-            chart_df["Benchmark"] = (1 + bench_ret).cumprod() * 100
-            
-            if l2_combo:
-                l2_ret = df[list(l2_combo)].pct_change().fillna(0).dot(l2_w)
-                chart_df["Best Pair"] = (1 + l2_ret).cumprod() * 100
-                
-            if l3_combo:
-                l3_ret = df[list(l3_combo)].pct_change().fillna(0).dot(l3_w)
-                chart_df["Best Triplet"] = (1 + l3_ret).cumprod() * 100
+            # STILE CSS AGGIORNATO PER LIGHT MODE (Carte con ombra leggera)
+            box_style = """
+            <div style='background-color: #FFFFFF; padding: 20px; border-radius: 10px; border: 1px solid #E0E0E0; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center;'>
+                <h4 style='color: #666666; margin:0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;'>{title}</h4>
+                <div style='margin: 15px 0;'>
+                    <span style='font-size: 32px; font-weight: 800; color: {color};'>SR {sharpe}</span>
+                </div>
+                <div style='display: flex; justify-content: space-between; padding: 10px 0; border-top: 1px solid #F0F0F0; border-bottom: 1px solid #F0F0F0; font-size: 14px; color: #333333;'>
+                    <span>Rendimento: <b>{ret}</b></span>
+                    <span>Max DD: <b style='color: #D32F2F;'>{mdd}</b></span>
+                </div>
+                <div style='margin-top: 10px; font-size: 12px; color: #888888;'>Sortino Ratio: <b>{sort}</b></div>
+            </div>
+            """
+            def render_box(col, title, color, stats):
+                r, v, s, sort, mdd = stats
+                col.markdown(box_style.format(title=title, color=color, sharpe=f"{s:.2f}", ret=f"{r*100:.1f}%", mdd=f"{mdd*100:.1f}%", sort=f"{sort:.2f}"), unsafe_allow_html=True)
 
-            fig = px.line(chart_df, template='plotly_white')
+            render_box(col1, "LINEA 1", "#FF4B4B", l1_stats)
+            if pair_assets: render_box(col2, "LINEA 2", "#1C83E1", pair_stats)
+            if triplet_assets: render_box(col3, "LINEA 3", "#00C853", triplet_stats)
+
+        # --- TAB 2: CORRELAZIONI ---
+        with tab2:
+            st.subheader("1. Asset Selezionati")
+            unique_assets = list(set([manual_asset] + list(pair_assets or []) + list(triplet_assets or [])))
+            clean_labels = {a: clean_asset_name(a) for a in unique_assets}
+            # Template Plotly White
+            fig_corr = px.imshow(df[unique_assets].rename(columns=clean_labels).corr(), text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, template='plotly_white')
+            st.plotly_chart(fig_corr, use_container_width=True)
+
+            st.markdown("---")
+            st.subheader("2. Intero Paniere")
+            all_clean = {a: clean_asset_name(a) for a in assets}
+            # Template Plotly White
+            fig_full = px.imshow(df.rename(columns=all_clean).corr(), text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, template='plotly_white')
+            fig_full.update_layout(height=600 if len(assets) < 15 else 900)
+            st.plotly_chart(fig_full, use_container_width=True)
+
+        # --- TAB 3: BACKTEST ---
+        with tab3:
+            st.subheader("Simulazione Storica (Equity Line)")
+            common_idx = l1_ret_frame.index
+            if pair_assets: common_idx = common_idx.intersection(l2_series.index)
+            if triplet_assets: common_idx = common_idx.intersection(l3_series.index)
             
-            # Aggiunta linea verticale Split
-            split_val = df.index[split_idx]
-            fig.add_vline(x=split_val, line_width=2, line_dash="dash", line_color="red")
-            fig.add_annotation(x=split_val, y=100, text="INIZIO TEST (FUTURO IGNOTO)", showarrow=True, arrowhead=1)
+            chart_df = pd.DataFrame(index=common_idx)
+            chart_df[f"L1: {clean_asset_name(manual_asset)}"] = (1 + l1_ret_frame.loc[common_idx][manual_asset]).cumprod() * 100
+            if pair_assets: chart_df["L2: Best Pair"] = (1 + l2_series.loc[common_idx]).cumprod() * 100
+            if triplet_assets: chart_df["L3: Best Triplet"] = (1 + l3_series.loc[common_idx]).cumprod() * 100
             
+            # Template Plotly White + Legenda NERA (Default)
+            fig = px.line(chart_df, x=chart_df.index, y=chart_df.columns, template='plotly_white')
+            fig.update_layout(
+                xaxis_title=None, 
+                yaxis_title="Valore (Base 100)", 
+                legend=dict(
+                    orientation="h", 
+                    y=1.1, 
+                    title=None
+                    # Non forziamo più il colore bianco, plotly_white usa il nero di default
+                )
+            )
             st.plotly_chart(fig, use_container_width=True)
 
-        with tab2:
-            st.subheader("Matrice di Correlazione (Intero Periodo)")
-            sel_assets = [manual_asset]
-            if l2_combo: sel_assets.extend(list(l2_combo))
-            if l3_combo: sel_assets.extend(list(l3_combo))
-            sel_assets = list(set(sel_assets))
+        # --- TAB 4: METODOLOGIA ---
+        with tab4:
+            st.subheader("📘 Logica di Funzionamento del Modello")
             
-            corr = df[sel_assets].corr()
-            fig_corr = px.imshow(corr, text_auto=".2f", color_continuous_scale='RdBu_r', zmin=-1, zmax=1)
-            st.plotly_chart(fig_corr)
+            st.markdown("""
+            ### 1. Come vengono scelti gli asset?
+            Il programma non "sceglie" in base a simpatie o trend. Usa un approccio puramente matematico basato sulla **Modern Portfolio Theory (MPT)**.
+            
+            * **Obiettivo Primario:** Massimizzare lo **Sharpe Ratio**.
+            * **Cosa significa:** Il software cerca la combinazione di asset e pesi che ha storicamente generato il **massimo rendimento per ogni unità di rischio** assunta. Non cerca il rendimento massimo assoluto (che spesso nasconde rischi folli), ma l'efficienza.
+            
+            ### 2. Come vengono calcolati i pesi? (Algoritmo SLSQP)
+            Utilizziamo un ottimizzatore non lineare (`Sequential Least Squares Programming`) che testa migliaia di combinazioni di percentuali per rispondere a questa domanda:
+            > *"Qual è la dose esatta di Asset A e Asset B che, miscelata insieme, rende la curva dei rendimenti più stabile possibile e inclinata verso l'alto?"*
+            
+            ### 3. I Filtri Strategici
+            Se hai attivato il filtro **"Max Correlazione"** nella barra laterale, il modello applica una censura preventiva:
+            1.  Analizza tutte le possibili coppie/terne.
+            2.  **SCARTA** immediatamente quelle che si muovono troppo insieme (correlazione > soglia).
+            3.  Solo tra le sopravvissute (quelle diversificate), cerca la più efficiente.
+            
+            ---
+            
+            ### 4. Glossario Brutale (Per non mentire a se stessi)
+            
+            | Metrica | Cosa ti dice (Traduzione Onesta) |
+            | :--- | :--- |
+            | **Sharpe Ratio** | Il voto in pagella del portafoglio. Sopra 1.0 è buono, sopra 2.0 è eccellente. Sotto 0.5 stai rischiando per nulla. |
+            | **Max Drawdown** | **Il dolore.** La percentuale massima che avresti perso dai massimi se avessi comprato nel momento peggiore e venduto nel momento peggiore. Se vedi -30% e non sei disposto a perdere 1/3 del capitale, lascia stare. |
+            | **Sortino Ratio** | Come lo Sharpe, ma ignora la volatilità "buona" (quando il titolo sale). È un giudice più severo e preciso per gli investitori avversi alle perdite. |
+            | **Correlazione** | **0.0 - 0.5:** Diversificazione reale (sicurezza). <br> **0.7 - 1.0:** Falsa diversificazione (se cade uno, cade anche l'altro). |
+            
+            ⚠️ **DISCLAIMER:** *Questo modello soffre di "Look-Ahead Bias". Ha ottimizzato i pesi guardando i dati del passato. Il futuro non sarà identico. Usa questi risultati come indicazione di potenziale strutturale, non come garanzia di profitto.*
+            """)
 
+    else:
+        st.error("File non valido.")
 else:
-    st.info("Attesa caricamento file...")
+    st.info("Carica il file CSV.")
