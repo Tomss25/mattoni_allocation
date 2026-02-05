@@ -352,4 +352,67 @@ if uploaded_file is not None:
             unique_assets = list(set([manual_asset] + list(pair_assets or []) + list(triplet_assets or [])))
             clean_labels = {a: clean_asset_name(a) for a in unique_assets}
             fig_corr = px.imshow(df[unique_assets].rename(columns=clean_labels).corr(), text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, template='plotly_white')
-            st.
+            st.plotly_chart(fig_corr, use_container_width=True)
+
+        with tab3:
+            st.subheader("Simulazione Storica (Base 100)")
+            # 1. Definizione Indice Comune
+            common_idx = l1_ret_frame.index
+            if pair_assets: common_idx = common_idx.intersection(l2_series.index)
+            if triplet_assets: common_idx = common_idx.intersection(l3_series.index)
+            
+            # 2. FORCE UNIQUE (Sicurezza Extra)
+            common_idx = common_idx.unique()
+
+            # 3. Costruzione DataFrame
+            chart_df = pd.DataFrame(index=common_idx)
+            
+            # 4. Assegnazione Sicura (Con reindex interno implicito che ora non fallirà)
+            try:
+                # Usiamo .reindex() esplicitamente per evitare ambiguità se ci fossero residui
+                chart_df[f"L1: {clean_asset_name(manual_asset)}"] = (1 + l1_ret_frame.loc[common_idx][manual_asset]).cumprod() * 100
+                if pair_assets: 
+                    chart_df["L2: Best Pair"] = (1 + l2_series.reindex(common_idx)).cumprod() * 100
+                if triplet_assets: 
+                    chart_df["L3: Best Triplet"] = (1 + l3_series.reindex(common_idx)).cumprod() * 100
+                
+                fig = px.line(chart_df, x=chart_df.index, y=chart_df.columns, template='plotly_white')
+                fig.update_layout(xaxis_title=None, yaxis_title="Valore", legend=dict(orientation="h", y=1.1, title=None))
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"Errore generazione grafico: {e}")
+
+
+        with tab4:
+            st.markdown("### Metodologia\nIl modello usa ottimizzazione SLSQP su serie storiche settimanali.")
+        
+        with tab5:
+            st.subheader("🔍 Ispezione Dati e Validazione")
+            col_d1, col_d2, col_d3 = st.columns(3)
+            col_d1.metric("Righe Originali", debug_info["raw_rows"])
+            col_d2.metric("Righe Pulite (Usate)", debug_info["clean_rows"])
+            col_d3.metric("Righe Scartate (Errori/Duplicati)", debug_info["dropped"], delta_color="inverse")
+            
+            if debug_info["duplicates_dropped"] > 0:
+                st.warning(f"⚠️ **ATTENZIONE:** Rilevati ed eliminati {debug_info['duplicates_dropped']} duplicati nelle date.")
+            
+            st.divider()
+            st.markdown("#### ✅ Input vs Engine")
+            df_returns = df.pct_change().dropna().tail(10) * 100
+            df_prices = df.tail(10)
+            
+            col_show1, col_show2 = st.columns(2)
+            with col_show1:
+                st.markdown("**1. INPUT PULITO (Prezzi/Indici)**")
+                st.dataframe(df_prices, use_container_width=True)
+            with col_show2:
+                st.markdown("**2. ENGINE (Variazioni Settimanali %)**")
+                st.dataframe(df_returns.style.format("{:.4f}%"), use_container_width=True)
+            
+            if df.select_dtypes(include=[np.number]).empty:
+                st.error("ERRORE GRAVE: Il dataframe non contiene numeri.")
+
+    else:
+        st.error("File vuoto o tutti i dati sono stati scartati durante la pulizia. Controlla il CSV.")
+else:
+    st.info("Carica il file CSV.")
