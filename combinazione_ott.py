@@ -311,7 +311,7 @@ if uploaded_file is not None:
             
             st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
             
-            # --- SEZIONE AGGIUNTA: DETTAGLIO COMPOSIZIONE (Line/Name/ISIN/Weight) ---
+            # --- SEZIONE: DETTAGLIO COMPOSIZIONE (Line/Name/ISIN/Weight) ---
             st.divider()
             st.subheader("📍 Dettaglio Composizione (Struttura Portafogli)")
             
