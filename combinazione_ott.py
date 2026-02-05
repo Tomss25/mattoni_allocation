@@ -97,59 +97,56 @@ st.markdown("""
 
 def load_data(file, fida_mode=False):
     """
-    Caricamento dati con GESTIONE DUPLICATI "NUCLEAR" (Groupby Last).
-    Restituisce una tupla: (DataFrame Pulito, Info Debug)
+    Caricamento dati con LOGICA TAPPA-BUCHI (Forward Fill).
+    Se manca un dato, usa quello della settimana prima invece di cancellare la data.
     """
     debug_info = {"raw_rows": 0, "clean_rows": 0, "dropped": 0, "duplicates_dropped": 0}
     
     try:
-        # 1. Caricamento Iniziale
+        # 1. Caricamento
         if fida_mode:
-            # Caricamento come stringa per gestire 'undefined'
             df = pd.read_csv(file, sep=';', dtype=str)
         else:
-            # Caricamento standard ma senza parsing date automatico subito
             df = pd.read_csv(file, sep=';', decimal=',')
             
         debug_info["raw_rows"] = len(df)
         df.columns = df.columns.str.strip()
         
-        # 2. Pulizia Colonne e Formato Numerico
+        # 2. Pulizia Colonne
         if fida_mode:
             for col in df.columns:
                 if col != 'Data':
                     df[col] = df[col].astype(str).str.strip()\
                                      .str.replace('undefined', 'NaN', case=False)\
+                                     .str.replace('null', 'NaN', case=False)\
                                      .str.replace(',', '.')
                     df[col] = pd.to_numeric(df[col], errors='coerce')
         else:
-             # Assicuro che tutto sia numerico anche in modalità standard
              for col in df.columns:
                 if col != 'Data' and df[col].dtype == object:
                      df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce')
 
-        # 3. Gestione Data (Critica)
+        # 3. Gestione Data
         df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
-        
-        # Rimuovo righe con data NaT (non valide)
         df = df.dropna(subset=['Data'])
         df.set_index('Data', inplace=True)
         
-        # 4. FIX DUPLICATI "NUCLEAR" (Groupby)
-        # Se ci sono date duplicate, raggruppo per data e prendo l'ultimo valore.
-        # Questo garantisce matematicamente l'unicità dell'indice.
-        initial_count = len(df)
-        df = df.groupby(level=0).last()
-        final_count = len(df)
+        # 4. FIX DUPLICATI
+        if df.index.duplicated().any():
+            initial_count = len(df)
+            df = df.groupby(level=0).last()
+            debug_info["duplicates_dropped"] = initial_count - len(df)
         
-        if initial_count > final_count:
-            debug_info["duplicates_dropped"] = initial_count - final_count
-        
-        # Ordino l'indice per sicurezza temporale
         df = df.sort_index()
 
-        # 5. Drop NaN (Sincronizzazione serie)
+        # 5. FIX BUCHI (IL PUNTO CRITICO)
+        # Invece di dropna() brutale, usiamo ffill() (copia il valore precedente)
+        # e poi bfill() (copia il successivo se il buco è all'inizio)
+        df = df.ffill().bfill()
+
+        # Ora dropna rimuove solo le righe che sono rimaste vuote nonostante tutto (es. colonne vuote)
         df_clean = df.dropna()
+        
         debug_info["clean_rows"] = len(df_clean)
         debug_info["dropped"] = debug_info["raw_rows"] - debug_info["clean_rows"]
         
@@ -160,7 +157,6 @@ def load_data(file, fida_mode=False):
         return None, debug_info
 
 def clean_asset_name(name):
-    """Rimuove il rumore dal nome dell'asset."""
     clean = re.sub(r'\s*\(.*\)', '', name)
     return clean.strip()
 
@@ -361,15 +357,14 @@ if uploaded_file is not None:
             if pair_assets: common_idx = common_idx.intersection(l2_series.index)
             if triplet_assets: common_idx = common_idx.intersection(l3_series.index)
             
-            # 2. FORCE UNIQUE (Sicurezza Extra)
+            # 2. FORCE UNIQUE
             common_idx = common_idx.unique()
 
             # 3. Costruzione DataFrame
             chart_df = pd.DataFrame(index=common_idx)
             
-            # 4. Assegnazione Sicura (Con reindex interno implicito che ora non fallirà)
+            # 4. Assegnazione Sicura
             try:
-                # Usiamo .reindex() esplicitamente per evitare ambiguità se ci fossero residui
                 chart_df[f"L1: {clean_asset_name(manual_asset)}"] = (1 + l1_ret_frame.loc[common_idx][manual_asset]).cumprod() * 100
                 if pair_assets: 
                     chart_df["L2: Best Pair"] = (1 + l2_series.reindex(common_idx)).cumprod() * 100
@@ -382,19 +377,17 @@ if uploaded_file is not None:
             except Exception as e:
                 st.error(f"Errore generazione grafico: {e}")
 
-
         with tab4:
             st.markdown("### Metodologia\nIl modello usa ottimizzazione SLSQP su serie storiche settimanali.")
         
         with tab5:
             st.subheader("🔍 Ispezione Dati e Validazione")
             col_d1, col_d2, col_d3 = st.columns(3)
-            col_d1.metric("Righe Originali", debug_info["raw_rows"])
-            col_d2.metric("Righe Pulite (Usate)", debug_info["clean_rows"])
-            col_d3.metric("Righe Scartate (Errori/Duplicati)", debug_info["dropped"], delta_color="inverse")
+            col_d1.metric("Righe Originali (Raw)", debug_info["raw_rows"])
+            col_d2.metric("Righe Recuperate (Forward Fill)", debug_info["clean_rows"])
+            col_d3.metric("Righe Perse", debug_info["dropped"], delta_color="inverse")
             
-            if debug_info["duplicates_dropped"] > 0:
-                st.warning(f"⚠️ **ATTENZIONE:** Rilevati ed eliminati {debug_info['duplicates_dropped']} duplicati nelle date.")
+            st.markdown("*Nota: Le righe recuperate includono quelle in cui i dati mancanti sono stati riempiti copiando il valore della settimana precedente.*")
             
             st.divider()
             st.markdown("#### ✅ Input vs Engine")
@@ -403,7 +396,7 @@ if uploaded_file is not None:
             
             col_show1, col_show2 = st.columns(2)
             with col_show1:
-                st.markdown("**1. INPUT PULITO (Prezzi/Indici)**")
+                st.markdown("**1. INPUT RECUPERATO (Prezzi/Indici)**")
                 st.dataframe(df_prices, use_container_width=True)
             with col_show2:
                 st.markdown("**2. ENGINE (Variazioni Settimanali %)**")
