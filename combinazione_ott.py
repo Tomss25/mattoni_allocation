@@ -98,7 +98,7 @@ st.markdown("""
 def load_data(file):
     """Caricamento robusto (Sep=; Dec=, Thousands=., Date=GG/MM/AAAA)."""
     try:
-        # FIX: thousands='.' aggiunto per gestire il formato numerico europeo corretto
+        # CORREZIONE APPLICATA QUI: aggiunto thousands='.'
         df = pd.read_csv(file, sep=';', decimal=',', thousands='.', index_col=0, parse_dates=True, dayfirst=True)
         df.columns = df.columns.str.strip()
         for col in df.columns:
@@ -259,7 +259,6 @@ if uploaded_file is not None:
             if max_corr_input < 1.0:
                 st.info(f"💡 Filtro Attivo: Combinazioni limitate a correlazione < {max_corr_input}.")
             
-            # Tabella Performance Riepilogativa
             table_data = []
             def make_row(label, asset_list, weights, corr, stats):
                 r, v, s, sort, mdd = stats
@@ -267,11 +266,12 @@ if uploaded_file is not None:
                 else: comp_str = format_composition(asset_list, weights)
                 return {
                     "Strategia": label,
-                    "Allocazione Sintetica": comp_str,
+                    "Allocazione (Pesi Ottimali)": comp_str,
                     "Corr. Media": f"{corr:.2f}" if isinstance(corr, float) else "N/A",
                     "Rend. Annuo": f"{r*100:.1f}%",
                     "Max DD": f"{mdd*100:.1f}%",
                     "Sharpe": f"{s:.2f}",
+                    "Sortino": f"{sort:.2f}"
                 }
             
             table_data.append(make_row("LINEA 1 (Manuale)", manual_asset, [1], l1_corr, l1_stats))
@@ -281,51 +281,11 @@ if uploaded_file is not None:
             
             st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
             
-            # --- NUOVA SEZIONE: DETTAGLIO COMPOSIZIONE ---
-            st.divider()
-            st.subheader("📍 Dettaglio Composizione (Struttura Portafogli)")
-            
-            comp_rows = []
-            
-            # Linea 1
-            comp_rows.append({
-                "Linea": "LINEA 1", 
-                "Nome Asset": clean_asset_name(manual_asset), 
-                "ISIN": "-", # N/A nel CSV
-                "Peso %": "100%"
-            })
-            
-            # Linea 2
-            if pair_assets:
-                sorted_pair = sorted(zip(pair_assets, pair_weights), key=lambda x: x[1], reverse=True)
-                for a, w in sorted_pair:
-                    if w > 0.001:
-                        comp_rows.append({
-                            "Linea": "LINEA 2", 
-                            "Nome Asset": clean_asset_name(a), 
-                            "ISIN": "-", 
-                            "Peso %": f"{w*100:.1f}%"
-                        })
-            
-            # Linea 3
-            if triplet_assets:
-                sorted_triplet = sorted(zip(triplet_assets, triplet_weights), key=lambda x: x[1], reverse=True)
-                for a, w in sorted_triplet:
-                    if w > 0.001:
-                        comp_rows.append({
-                            "Linea": "LINEA 3", 
-                            "Nome Asset": clean_asset_name(a), 
-                            "ISIN": "-", 
-                            "Peso %": f"{w*100:.1f}%"
-                        })
-            
-            st.dataframe(pd.DataFrame(comp_rows), hide_index=True, use_container_width=True)
-            
             st.divider()
             st.markdown("### 📊 Performance vs Rischio")
             col1, col2, col3 = st.columns(3)
             
-            # STILE CSS AGGIORNATO PER LIGHT MODE
+            # STILE CSS AGGIORNATO PER LIGHT MODE (Carte con ombra leggera)
             box_style = """
             <div style='background-color: #FFFFFF; padding: 20px; border-radius: 10px; border: 1px solid #E0E0E0; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center;'>
                 <h4 style='color: #666666; margin:0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;'>{title}</h4>
@@ -352,12 +312,14 @@ if uploaded_file is not None:
             st.subheader("1. Asset Selezionati")
             unique_assets = list(set([manual_asset] + list(pair_assets or []) + list(triplet_assets or [])))
             clean_labels = {a: clean_asset_name(a) for a in unique_assets}
+            # Template Plotly White
             fig_corr = px.imshow(df[unique_assets].rename(columns=clean_labels).corr(), text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, template='plotly_white')
             st.plotly_chart(fig_corr, use_container_width=True)
 
             st.markdown("---")
             st.subheader("2. Intero Paniere")
             all_clean = {a: clean_asset_name(a) for a in assets}
+            # Template Plotly White
             fig_full = px.imshow(df.rename(columns=all_clean).corr(), text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, template='plotly_white')
             fig_full.update_layout(height=600 if len(assets) < 15 else 900)
             st.plotly_chart(fig_full, use_container_width=True)
@@ -374,11 +336,17 @@ if uploaded_file is not None:
             if pair_assets: chart_df["L2: Best Pair"] = (1 + l2_series.loc[common_idx]).cumprod() * 100
             if triplet_assets: chart_df["L3: Best Triplet"] = (1 + l3_series.loc[common_idx]).cumprod() * 100
             
+            # Template Plotly White + Legenda NERA (Default)
             fig = px.line(chart_df, x=chart_df.index, y=chart_df.columns, template='plotly_white')
             fig.update_layout(
                 xaxis_title=None, 
                 yaxis_title="Valore (Base 100)", 
-                legend=dict(orientation="h", y=1.1, title=None)
+                legend=dict(
+                    orientation="h", 
+                    y=1.1, 
+                    title=None
+                    # Non forziamo più il colore bianco, plotly_white usa il nero di default
+                )
             )
             st.plotly_chart(fig, use_container_width=True)
 
