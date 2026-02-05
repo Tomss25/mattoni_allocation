@@ -96,36 +96,15 @@ st.markdown("""
 # --- MOTORE MATEMATICO ---
 
 def load_data(file):
-    """
-    Caricamento intelligente:
-    1. Cerca automaticamente la colonna Date/Data.
-    2. Gestisce separatori di migliaia (.).
-    3. Rimuove colonne vuote o 'Unnamed'.
-    """
+    """Caricamento robusto (Sep=; Dec=, Thousands=., Date=GG/MM/AAAA)."""
     try:
-        df = pd.read_csv(file, sep=';', decimal=',', thousands='.')
-        
-        date_col = None
-        for col in df.columns:
-            if 'date' in col.lower() or 'data' in col.lower():
-                date_col = col
-                break
-        
-        if not date_col:
-            st.error("Nessuna colonna 'Date' o 'Data' trovata nel CSV.")
-            return None
-
-        df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors='coerce')
-        df.set_index(date_col, inplace=True)
-        df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+        # CORREZIONE APPLICATA: aggiunto thousands='.'
+        df = pd.read_csv(file, sep=';', decimal=',', thousands='.', index_col=0, parse_dates=True, dayfirst=True)
         df.columns = df.columns.str.strip()
-        
         for col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-            
         return df.dropna()
     except Exception as e:
-        st.error(f"Errore di lettura: {e}")
         return None
 
 def clean_asset_name(name):
@@ -134,6 +113,7 @@ def clean_asset_name(name):
     return clean.strip()
 
 def get_advanced_stats(weights, returns):
+    """Calcola metriche avanzate: Rendimento, Volatilità, Sharpe, Sortino, MDD."""
     weights = np.array(weights)
     port_series = returns.dot(weights)
     
@@ -160,13 +140,8 @@ def get_avg_correlation(data, assets):
     values = corr_matrix.values[np.triu_indices_from(corr_matrix, k=1)]
     return values.mean()
 
-def optimize_portfolio(returns, min_weight=0.0):
+def optimize_portfolio(returns):
     n_assets = len(returns.columns)
-    
-    # Check di sicurezza matematico (es. 3 asset * 40% = 120% -> impossibile)
-    if n_assets * min_weight > 1.0:
-        return None 
-        
     def objective(weights):
         w = np.array(weights)
         ret = np.sum(returns.mean() * w) * 52
@@ -175,18 +150,14 @@ def optimize_portfolio(returns, min_weight=0.0):
         return -s
 
     constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-    # Vincolo CRUCIALE: ogni asset deve avere almeno min_weight
-    bounds = tuple((min_weight, 1) for _ in range(n_assets))
+    bounds = tuple((0, 1) for _ in range(n_assets))
     init_guess = [1./n_assets for _ in range(n_assets)]
     
-    try:
-        result = minimize(objective, init_guess, method='SLSQP', bounds=bounds, constraints=constraints)
-        return result.x
-    except:
-        return None
+    result = minimize(objective, init_guess, method='SLSQP', bounds=bounds, constraints=constraints)
+    return result.x
 
 @st.cache_data(show_spinner=False)
-def find_best_optimized_combination(data, k, max_corr_threshold=1.0, min_w=0.0):
+def find_best_optimized_combination(data, k, max_corr_threshold=1.0):
     assets = data.columns.tolist()
     if len(assets) < k: return None, None, (0,0,0,0,0)
     
@@ -195,28 +166,20 @@ def find_best_optimized_combination(data, k, max_corr_threshold=1.0, min_w=0.0):
     best_weights = None
     best_full_stats = None
     
-    # Se il peso minimo rende impossibile la combinazione, esci subito
-    if k * min_w > 1.0:
-        return None, None, (0,0,0,0,0)
-    
     for combo in itertools.combinations(assets, k):
         # Filtro correlazione
         current_corr = get_avg_correlation(data, combo)
         
         if current_corr <= max_corr_threshold:
             subset = data[list(combo)].pct_change().dropna()
+            weights = optimize_portfolio(subset)
+            r, v, s, sort, mdd = get_advanced_stats(weights, subset)
             
-            # Passiamo il min_weight all'ottimizzatore
-            weights = optimize_portfolio(subset, min_weight=min_w)
-            
-            if weights is not None:
-                r, v, s, sort, mdd = get_advanced_stats(weights, subset)
-                
-                if s > best_sharpe:
-                    best_sharpe = s
-                    best_combo = combo
-                    best_weights = weights
-                    best_full_stats = (r, v, s, sort, mdd)
+            if s > best_sharpe:
+                best_sharpe = s
+                best_combo = combo
+                best_weights = weights
+                best_full_stats = (r, v, s, sort, mdd)
             
     return best_combo, best_weights, best_full_stats
 
@@ -224,7 +187,6 @@ def format_composition(assets, weights):
     items = []
     sorted_pairs = sorted(zip(assets, weights), key=lambda x: x[1], reverse=True)
     for a, w in sorted_pairs:
-        # Filtro per pulizia visiva (anche se ora avremo min 5% quindi questo scatta sempre)
         if w > 0.001: 
             clean_name = clean_asset_name(a)
             items.append(f"{clean_name} ({w*100:.0f}%)")
@@ -250,18 +212,6 @@ with st.sidebar:
         value=1.0, 
         step=0.05
     )
-    
-    st.markdown("Vincoli di Portafoglio:")
-    # Slider per il peso minimo. Default impostato a 10% per forzare "senso" nell'allocazione.
-    min_weight_pct = st.slider(
-        "Peso Minimo per Asset (%)",
-        min_value=0,
-        max_value=33, 
-        value=10, 
-        step=1,
-        help="Percentuale minima obbligatoria per ogni asset. Default 10% per garantire diversificazione reale."
-    )
-    min_weight_val = min_weight_pct / 100.0
 
 if uploaded_file is not None:
     df = load_data(uploaded_file)
@@ -270,7 +220,7 @@ if uploaded_file is not None:
         assets = df.columns.tolist()
         
         with st.spinner('Calcolo Ottimizzazione e Analisi Metodologica...'):
-            # 1. Best Single Asset (Linea 1 - 1 Titolo Obbligatorio)
+            # 1. Best Single Asset
             temp_sharpes = {}
             for a in assets:
                 r_t = df[[a]].pct_change().dropna()
@@ -288,17 +238,14 @@ if uploaded_file is not None:
             l1_stats = get_advanced_stats([1], l1_ret_frame)
             l1_corr = 1.0
             
-            # 🛡️ HARD FLOOR: Se l'utente mette 0%, noi forziamo comunque il 5% per evitare allocazioni ridicole.
-            forced_min_w = max(min_weight_val, 0.05)
-
-            # 2. Best Pair Optimized (Linea 2 - 2 Titoli Obbligatori)
-            pair_assets, pair_weights, pair_stats = find_best_optimized_combination(df, 2, max_corr_input, min_w=forced_min_w)
+            # 2. Best Pair Optimized
+            pair_assets, pair_weights, pair_stats = find_best_optimized_combination(df, 2, max_corr_input)
             if pair_assets:
                 l2_corr = get_avg_correlation(df, pair_assets)
                 l2_series = df[list(pair_assets)].pct_change().dropna().dot(pair_weights)
             
-            # 3. Best Triplet Optimized (Linea 3 - 3 Titoli Obbligatori)
-            triplet_assets, triplet_weights, triplet_stats = find_best_optimized_combination(df, 3, max_corr_input, min_w=forced_min_w)
+            # 3. Best Triplet Optimized
+            triplet_assets, triplet_weights, triplet_stats = find_best_optimized_combination(df, 3, max_corr_input)
             if triplet_assets:
                 l3_corr = get_avg_correlation(df, triplet_assets)
                 l3_series = df[list(triplet_assets)].pct_change().dropna().dot(triplet_weights)
@@ -312,8 +259,6 @@ if uploaded_file is not None:
             if max_corr_input < 1.0:
                 st.info(f"💡 Filtro Attivo: Combinazioni limitate a correlazione < {max_corr_input}.")
             
-            st.info(f"⚖️ Vincolo Diversificazione: Ogni asset pesa almeno il {int(forced_min_w*100)}%.")
-
             # Tabella Riepilogativa (Performance)
             table_data = []
             def make_row(label, asset_list, weights, corr, stats):
@@ -330,24 +275,59 @@ if uploaded_file is not None:
                 }
             
             table_data.append(make_row("LINEA 1 (Manuale)", manual_asset, [1], l1_corr, l1_stats))
-            
-            if pair_assets: 
-                table_data.append(make_row("LINEA 2 (Best Pair)", pair_assets, pair_weights, l2_corr, pair_stats))
-            else: 
-                st.warning("LINEA 2: Nessuna combinazione soddisfa i vincoli di peso minimo.")
-                
-            if triplet_assets: 
-                table_data.append(make_row("LINEA 3 (Best Triplet)", triplet_assets, triplet_weights, l3_corr, triplet_stats))
-            else:
-                 st.warning("LINEA 3: Nessuna combinazione soddisfa i vincoli di peso minimo.")
+            if pair_assets: table_data.append(make_row("LINEA 2 (Best Pair)", pair_assets, pair_weights, l2_corr, pair_stats))
+            else: st.warning("Nessuna coppia trovata con i filtri attuali.")
+            if triplet_assets: table_data.append(make_row("LINEA 3 (Best Triplet)", triplet_assets, triplet_weights, l3_corr, triplet_stats))
             
             st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
             
+            # --- SEZIONE AGGIUNTA: DETTAGLIO COMPOSIZIONE (Line/Name/ISIN/Weight) ---
+            st.divider()
+            st.subheader("📍 Dettaglio Composizione (Struttura Portafogli)")
+            
+            comp_rows = []
+            
+            # Linea 1 (Singola)
+            comp_rows.append({
+                "Linea": "LINEA 1", 
+                "Nome Asset": clean_asset_name(manual_asset), 
+                "ISIN": "-", # Placeholder (Dati mancanti nel CSV)
+                "Peso %": "100%"
+            })
+            
+            # Linea 2 (Coppia)
+            if pair_assets:
+                sorted_pair = sorted(zip(pair_assets, pair_weights), key=lambda x: x[1], reverse=True)
+                for a, w in sorted_pair:
+                    if w > 0.001: # Mostra solo se peso > 0.1%
+                        comp_rows.append({
+                            "Linea": "LINEA 2", 
+                            "Nome Asset": clean_asset_name(a), 
+                            "ISIN": "-", 
+                            "Peso %": f"{w*100:.1f}%"
+                        })
+            
+            # Linea 3 (Tripletta)
+            if triplet_assets:
+                sorted_triplet = sorted(zip(triplet_assets, triplet_weights), key=lambda x: x[1], reverse=True)
+                for a, w in sorted_triplet:
+                    if w > 0.001:
+                        comp_rows.append({
+                            "Linea": "LINEA 3", 
+                            "Nome Asset": clean_asset_name(a), 
+                            "ISIN": "-", 
+                            "Peso %": f"{w*100:.1f}%"
+                        })
+            
+            # Visualizzazione Tabella Dettaglio
+            st.dataframe(pd.DataFrame(comp_rows), hide_index=True, use_container_width=True)
+            # -----------------------------------------------------------------------
+
             st.divider()
             st.markdown("### 📊 Performance vs Rischio")
             col1, col2, col3 = st.columns(3)
             
-            # STILE CSS AGGIORNATO PER LIGHT MODE
+            # STILE CSS AGGIORNATO PER LIGHT MODE (Carte con ombra leggera)
             box_style = """
             <div style='background-color: #FFFFFF; padding: 20px; border-radius: 10px; border: 1px solid #E0E0E0; box-shadow: 0 4px 6px rgba(0,0,0,0.05); text-align: center;'>
                 <h4 style='color: #666666; margin:0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;'>{title}</h4>
@@ -374,12 +354,14 @@ if uploaded_file is not None:
             st.subheader("1. Asset Selezionati")
             unique_assets = list(set([manual_asset] + list(pair_assets or []) + list(triplet_assets or [])))
             clean_labels = {a: clean_asset_name(a) for a in unique_assets}
+            # Template Plotly White
             fig_corr = px.imshow(df[unique_assets].rename(columns=clean_labels).corr(), text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, template='plotly_white')
             st.plotly_chart(fig_corr, use_container_width=True)
 
             st.markdown("---")
             st.subheader("2. Intero Paniere")
             all_clean = {a: clean_asset_name(a) for a in assets}
+            # Template Plotly White
             fig_full = px.imshow(df.rename(columns=all_clean).corr(), text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, template='plotly_white')
             fig_full.update_layout(height=600 if len(assets) < 15 else 900)
             st.plotly_chart(fig_full, use_container_width=True)
@@ -396,6 +378,7 @@ if uploaded_file is not None:
             if pair_assets: chart_df["L2: Best Pair"] = (1 + l2_series.loc[common_idx]).cumprod() * 100
             if triplet_assets: chart_df["L3: Best Triplet"] = (1 + l3_series.loc[common_idx]).cumprod() * 100
             
+            # Template Plotly White + Legenda NERA (Default)
             fig = px.line(chart_df, x=chart_df.index, y=chart_df.columns, template='plotly_white')
             fig.update_layout(
                 xaxis_title=None, 
