@@ -193,7 +193,7 @@ def format_composition(assets, weights):
 
 # --- UI APPLICAZIONE ---
 
-st.title("🛡️ Asset Optimizer: Executive Dashboard")
+st.title("🛡️ Quant Allocation: 3-Tier Model")
 
 # SIDEBAR
 with st.sidebar:
@@ -388,3 +388,4 @@ if uploaded_file is not None:
         st.error("File non valido.")
 else:
     st.info("Carica il file CSV.")
+
