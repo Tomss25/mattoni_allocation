@@ -127,7 +127,10 @@ def load_data(file, fida_mode=False):
                      df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce')
 
         # 3. Gestione Data
+        # Usa errors='coerce' per trasformare date invalide in NaT
         df['Data'] = pd.to_datetime(df['Data'], dayfirst=True, errors='coerce')
+        
+        # Rimuove righe dove la data è NaT (fondamentale per file con righe vuote alla fine)
         df = df.dropna(subset=['Data'])
         df.set_index('Data', inplace=True)
         
@@ -382,25 +385,32 @@ if uploaded_file is not None:
         
         with tab5:
             st.subheader("🔍 Ispezione Dati e Validazione")
+            
+            # Metriche di Range
+            col_m1, col_m2, col_m3 = st.columns(3)
+            col_m1.metric("Data Inizio", df.index.min().strftime('%d/%m/%Y'))
+            col_m2.metric("Data Fine", df.index.max().strftime('%d/%m/%Y'))
+            col_m3.metric("Totale Settimane", len(df))
+
+            st.divider()
+            
             col_d1, col_d2, col_d3 = st.columns(3)
             col_d1.metric("Righe Originali (Raw)", debug_info["raw_rows"])
             col_d2.metric("Righe Recuperate (Forward Fill)", debug_info["clean_rows"])
             col_d3.metric("Righe Perse", debug_info["dropped"], delta_color="inverse")
             
-            st.markdown("*Nota: Le righe recuperate includono quelle in cui i dati mancanti sono stati riempiti copiando il valore della settimana precedente.*")
+            st.markdown("*Nota: Le righe perse sono spesso date vuote a fine file o righe totalmente corrotte.*")
             
             st.divider()
-            st.markdown("#### ✅ Input vs Engine")
-            df_returns = df.pct_change().dropna().tail(10) * 100
-            df_prices = df.tail(10)
+            st.markdown("#### ✅ Input vs Engine (Testa e Coda)")
             
             col_show1, col_show2 = st.columns(2)
             with col_show1:
-                st.markdown("**1. INPUT RECUPERATO (Prezzi/Indici)**")
-                st.dataframe(df_prices, use_container_width=True)
+                st.markdown("**1. PRIME 5 SETTIMANE (2021)**")
+                st.dataframe(df.head(5), use_container_width=True)
             with col_show2:
-                st.markdown("**2. ENGINE (Variazioni Settimanali %)**")
-                st.dataframe(df_returns.style.format("{:.4f}%"), use_container_width=True)
+                st.markdown("**2. ULTIME 5 SETTIMANE (2025/2026)**")
+                st.dataframe(df.tail(5), use_container_width=True)
             
             if df.select_dtypes(include=[np.number]).empty:
                 st.error("ERRORE GRAVE: Il dataframe non contiene numeri.")
