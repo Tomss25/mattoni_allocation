@@ -79,43 +79,35 @@ st.markdown("""
 @st.cache_data(show_spinner=False)
 def load_data(file):
     """
-    Caricamento Ibrido: CSV (Blindato Europeo) + XLSX (Excel Nativo).
+    Caricamento Blindato per CSV Europei.
+    Gestisce separatori (;), decimali (,), migliaia (.) e date (DD/MM/YYYY).
     """
+    encodings = ['utf-8', 'latin1', 'cp1252', 'ISO-8859-1']
     df = None
     file.seek(0)
     
-    # --- BRANCHING: EXCEL VS CSV ---
-    if file.name.endswith('.xlsx'):
+    # 1. Tentativo di lettura robusto
+    for enc in encodings:
         try:
-            # Lettura Excel nativa (non servono separatori)
-            df = pd.read_excel(file)
-        except Exception as e:
-            st.error(f"Errore lettura Excel: {e}")
-            return None
-    else:
-        # --- LOGICA CSV BLINDATA (ORIGINALE) ---
-        encodings = ['utf-8', 'latin1', 'cp1252', 'ISO-8859-1']
-        for enc in encodings:
-            try:
-                file.seek(0)
-                df = pd.read_csv(
-                    file, 
-                    sep=';', 
-                    decimal=',', 
-                    thousands='.', 
-                    encoding=enc,
-                    dayfirst=True 
-                )
-                break
-            except Exception:
-                continue
+            file.seek(0)
+            df = pd.read_csv(
+                file, 
+                sep=';', 
+                decimal=',', 
+                thousands='.', 
+                encoding=enc,
+                dayfirst=True 
+            )
+            break
+        except Exception:
+            continue
 
     if df is None:
-        st.error("Errore fatale: Impossibile decodificare il file.")
+        st.error("Errore fatale: Impossibile decodificare il file. Verifica che sia un CSV standard.")
         return None
 
     try:
-        # --- PULIZIA DATI (COMUNE A ENTRAMBI I FORMATI) ---
+        # 2. Pulizia e Standardizzazione
         date_col = None
         for col in df.columns:
             if 'date' in col.lower() or 'data' in col.lower():
@@ -139,7 +131,7 @@ def load_data(file):
         for col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # Riempimento buchi
+        # Riempimento buchi (invece di cancellare tutto)
         df = df.fillna(method='ffill').dropna()
             
         return df
@@ -217,6 +209,8 @@ def find_best_optimized_combination(data, k, annual_factor, max_corr_threshold=1
     # Limitiamo il numero di combinazioni per sicurezza se troppi asset
     if len(assets) > 15 and k > 2:
         st.warning("⚠️ Troppi asset per calcolo combinatorio completo. Analisi ridotta.")
+        # Qui in un sistema reale servirebbe un Genetic Algorithm. 
+        # Per ora lasciamo correre ma attenzione ai tempi.
 
     for combo in itertools.combinations(assets, k):
         current_corr = get_avg_correlation(data, combo)
@@ -252,15 +246,14 @@ st.title("🛡️ Quant Allocation: 3-Tier Model")
 # SIDEBAR
 with st.sidebar:
     st.header("1. Data Feed")
-    # MODIFICA QUI: Aggiunto xlsx
-    uploaded_file = st.file_uploader("Carica Dati (CSV o Excel)", type=["csv", "xlsx"])
+    uploaded_file = st.file_uploader("Carica CSV (es. GLOBAL ST.csv)", type=["csv"])
     
     st.markdown("---")
     st.header("2. Configurazione Dati")
     freq_choice = st.selectbox(
         "Frequenza Dati",
         options=[52, 252, 12],
-        index=0, 
+        index=0, # Default su 52 (Settimanale) per il tuo file
         format_func=lambda x: "Settimanale (52)" if x == 52 else ("Giornaliera (252)" if x == 252 else "Mensile (12)")
     )
     annual_factor = freq_choice
@@ -419,12 +412,12 @@ if uploaded_file is not None:
         with tab4:
             st.markdown("""
             ### Note Tecniche
-            * **Supporto:** CSV (Europeo) e XLSX (Excel).
-            * **Frequenza:** Assicurati che il selettore nella sidebar corrisponda ai tuoi dati.
-            * **Ottimizzazione:** Algoritmo SLSQP per massimizzazione Sharpe Ratio.
+            * **Frequenza:** Assicurati che il selettore nella sidebar corrisponda ai tuoi dati (es. 52 per settimanale).
+            * **Ottimizzazione:** Algoritmo SLSQP (Sequential Least Squares Programming) per massimizzazione Sharpe Ratio.
+            * **Dati Mancanti:** Gestiti tramite 'Forward Fill' per preservare la storicità.
             """)
 
     else:
         st.error("File non valido.")
 else:
-    st.info("Carica il file (CSV o Excel) per iniziare.")
+    st.info("Carica il file CSV per iniziare.")
