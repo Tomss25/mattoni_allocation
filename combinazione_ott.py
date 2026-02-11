@@ -79,43 +79,93 @@ st.markdown("""
 @st.cache_data(show_spinner=False)
 def load_data(file):
     """
-    Caricamento Ibrido: CSV (Blindato Europeo) + XLSX (Excel Nativo).
+    Caricamento Intelligente Universale:
+    1. Gestisce CSV (Sep ;/,) ed Excel (.xlsx).
+    2. Trova automaticamente la riga di Header (salta righe vuote).
+    3. Rileva se il file è Trasposto (Date in colonna) e lo ruota.
+    4. Gestisce formati numerici misti (EU/US).
     """
     df = None
     file.seek(0)
+    is_excel = file.name.endswith('.xlsx')
     
-    # --- BRANCHING: EXCEL VS CSV ---
-    if file.name.endswith('.xlsx'):
+    # 1. LETTURA RAW (Senza assumere header o formato)
+    if is_excel:
         try:
-            # Lettura Excel nativa (non servono separatori)
-            df = pd.read_excel(file)
+            df = pd.read_excel(file, header=None)
         except Exception as e:
-            st.error(f"Errore lettura Excel: {e}")
+            st.error(f"Errore Excel: {e}")
             return None
     else:
-        # --- LOGICA CSV BLINDATA (ORIGINALE) ---
-        encodings = ['utf-8', 'latin1', 'cp1252', 'ISO-8859-1']
+        # Tentativi CSV (Encoding + Separatori)
+        encodings = ['utf-8', 'latin1', 'cp1252']
+        separators = [';', ','] 
+        
         for enc in encodings:
-            try:
-                file.seek(0)
-                df = pd.read_csv(
-                    file, 
-                    sep=';', 
-                    decimal=',', 
-                    thousands='.', 
-                    encoding=enc,
-                    dayfirst=True 
-                )
-                break
-            except Exception:
-                continue
+            for sep in separators:
+                try:
+                    file.seek(0)
+                    # Legge tutto come testo/oggetto per non perdere dati
+                    df = pd.read_csv(file, sep=sep, header=None, encoding=enc, engine='python')
+                    if df.shape[1] > 1: # Se ha creato colonne, è buono
+                        break
+                except:
+                    continue
+            if df is not None: break
 
     if df is None:
-        st.error("Errore fatale: Impossibile decodificare il file.")
+        st.error("Errore fatale: File illeggibile.")
         return None
 
     try:
-        # --- PULIZIA DATI (COMUNE A ENTRAMBI I FORMATI) ---
+        # 2. RICERCA HEADER (Dove inizia la tabella?)
+        # Cerca la prima riga che contiene "DATE" o "DATA"
+        header_idx = -1
+        for i, row in df.iterrows():
+            row_str = row.astype(str).str.lower()
+            if row_str.str.contains('date').any() or row_str.str.contains('data').any():
+                header_idx = i
+                break
+        
+        if header_idx == -1:
+            # Fallback: assume riga 0 se non trova nulla
+            header_idx = 0
+            
+        # Promuove la riga trovata a Intestazione
+        df.columns = df.iloc[header_idx]
+        df = df.iloc[header_idx+1:].reset_index(drop=True)
+        # Pulisce nomi colonne
+        df.columns = [str(c).strip() for c in df.columns]
+
+        # 3. RILEVAMENTO TRASPOSIZIONE (Il file è ruotato?)
+        # Se le colonne (dalla 2a in poi) sembrano date, il file è trasposto
+        is_transposed = False
+        try:
+            sample_cols = df.columns[1:10] # Controlla le prime colonne dati
+            valid_dates = 0
+            for c in sample_cols:
+                try:
+                    pd.to_datetime(c, dayfirst=True)
+                    valid_dates += 1
+                except:
+                    pass
+            # Se più del 50% delle colonne sono date, è trasposto
+            if len(sample_cols) > 0 and (valid_dates / len(sample_cols)) > 0.5:
+                is_transposed = True
+        except:
+            pass
+
+        # 4. NORMALIZZAZIONE STRUTTURA
+        if is_transposed:
+            # Imposta la prima colonna (Nomi Asset) come indice temporaneo
+            df = df.set_index(df.columns[0])
+            # Ruota la matrice
+            df = df.T
+            # Ora l'indice sono le Date, le Colonne sono gli Asset
+            df.index.name = 'DATE' # Rinomina indice per standardizzazione
+            df = df.reset_index() # Riporta DATE come colonna per il flusso standard
+
+        # 5. PARSING DATA E NUMERI (Logica Standard)
         date_col = None
         for col in df.columns:
             if 'date' in col.lower() or 'data' in col.lower():
@@ -123,21 +173,25 @@ def load_data(file):
                 break
         
         if not date_col:
-            st.error("Nessuna colonna 'Date' trovata.")
+            st.error("Colonna 'Date' non identificabile.")
             return None
 
-        # Conversione data
+        # Conversione Data
         df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors='coerce')
         df = df.dropna(subset=[date_col])
         df.set_index(date_col, inplace=True)
-        
-        # Pulizia nomi colonne
-        df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
-        df.columns = df.columns.str.strip()
-        
-        # Conversione numerica
+        df = df.loc[:, ~df.columns.str.contains('^Unnamed')] # Via colonne fantasma
+
+        # Conversione Numerica Robusta (Gestisce sia 1.000,00 che 1000.00)
         for col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            series = df[col].astype(str)
+            # Tenta conversione standard (US)
+            df[col] = pd.to_numeric(series, errors='coerce')
+            
+            # Se troppi NaN, tenta conversione EU (rimuovi punti, cambia virgola in punto)
+            if df[col].isna().sum() > len(df) * 0.5:
+                clean_series = series.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                df[col] = pd.to_numeric(clean_series, errors='coerce')
         
         # Riempimento buchi
         df = df.fillna(method='ffill').dropna()
@@ -145,7 +199,7 @@ def load_data(file):
         return df
 
     except Exception as e:
-        st.error(f"Errore di elaborazione dati: {e}")
+        st.error(f"Errore elaborazione: {e}")
         return None
 
 def clean_asset_name(name):
@@ -214,7 +268,6 @@ def find_best_optimized_combination(data, k, annual_factor, max_corr_threshold=1
     if k * min_w > 1.0:
         return None, None, (0,0,0,0,0)
     
-    # Limitiamo il numero di combinazioni per sicurezza se troppi asset
     if len(assets) > 15 and k > 2:
         st.warning("⚠️ Troppi asset per calcolo combinatorio completo. Analisi ridotta.")
 
@@ -252,7 +305,6 @@ st.title("🛡️ Quant Allocation: 3-Tier Model")
 # SIDEBAR
 with st.sidebar:
     st.header("1. Data Feed")
-    # MODIFICA QUI: Aggiunto xlsx
     uploaded_file = st.file_uploader("Carica Dati (CSV o Excel)", type=["csv", "xlsx"])
     
     st.markdown("---")
@@ -312,7 +364,7 @@ if uploaded_file is not None:
             l1_corr = 1.0
             
             # Floor Peso
-            forced_min_w = max(min_weight_val, 0.01) # Minimo 1% tecnico
+            forced_min_w = max(min_weight_val, 0.01)
 
             # 2. Best Pair
             pair_assets, pair_weights, pair_stats = find_best_optimized_combination(
@@ -419,9 +471,9 @@ if uploaded_file is not None:
         with tab4:
             st.markdown("""
             ### Note Tecniche
-            * **Supporto:** CSV (Europeo) e XLSX (Excel).
-            * **Frequenza:** Assicurati che il selettore nella sidebar corrisponda ai tuoi dati.
-            * **Ottimizzazione:** Algoritmo SLSQP per massimizzazione Sharpe Ratio.
+            * **Flessibilità Totale:** Supporta file Standard e Trasposti (Date in orizzontale).
+            * **Pulizia:** Rileva automaticamente l'intestazione anche se ci sono righe vuote.
+            * **Numeri:** Supporta formati EU (1.000,00) e US (1000.00).
             """)
 
     else:
