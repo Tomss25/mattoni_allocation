@@ -4,6 +4,7 @@ import numpy as np
 import itertools
 import plotly.express as px
 import re
+import io  # <--- AGGIUNTO PER GESTIRE L'EXPORT
 from scipy.optimize import minimize
 
 # --- CONFIGURAZIONE ---
@@ -319,7 +320,7 @@ if uploaded_file is not None:
                     "Rend. Annuo": f"{r*100:.1f}%",
                     "Max DD": f"{mdd*100:.1f}%",
                     "Sharpe": f"{s:.2f}",
-                    "Volatilità": f"{v*100:.1f}%"  # <--- AGGIUNTA QUI
+                    "Volatilità": f"{v*100:.1f}%"
                 }
             
             table_data.append(make_row("LINEA 1 (Manuale)", manual_asset, [1], l1_corr, l1_stats))
@@ -329,7 +330,25 @@ if uploaded_file is not None:
             if triplet_assets: table_data.append(make_row("LINEA 3 (Best Triplet)", triplet_assets, triplet_weights, l3_corr, triplet_stats))
             else: st.warning("LINEA 3: Nessuna combinazione soddisfa i vincoli.")
             
+            # DF Visualization
             st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
+            
+            # --- PULSANTE EXPORT EXCEL ---
+            st.divider()
+            
+            # Creazione del buffer Excel in memoria
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                # Scriviamo il dataframe table_data in un foglio Excel
+                pd.DataFrame(table_data).to_excel(writer, index=False, sheet_name='Report Allocazione')
+                
+            st.download_button(
+                label="📥 DOWNLOAD REPORT EXCEL",
+                data=buffer.getvalue(),
+                file_name="Report_Allocazione.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            # -----------------------------
             
             st.divider()
             st.markdown("### 📊 Performance vs Rischio")
