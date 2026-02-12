@@ -9,68 +9,18 @@ from scipy.optimize import minimize
 # --- CONFIGURAZIONE ---
 st.set_page_config(page_title="Asset Allocation: Light Executive", layout="wide")
 
-# --- STYLING CSS AVANZATO (LIGHT MODE - EXECUTIVE STYLE) ---
+# --- STYLING CSS AVANZATO ---
 st.markdown("""
 <style>
-    /* Sfondo Principale - Bianco Pulito */
-    .stApp {
-        background-color: #FFFFFF;
-        color: #31333F;
-    }
-    
-    /* Sidebar - Grigio Tenue Professionale */
-    [data-testid="stSidebar"] {
-        background-color: #F8F9FA;
-        border-right: 1px solid #E0E0E0;
-    }
-    
-    /* Testi e Header */
-    h1, h2, h3, h4, h5, h6 {
-        color: #000000 !important;
-        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        font-weight: 700;
-        letter-spacing: -0.5px;
-    }
-    
-    p, div, label, li {
-        color: #31333F;
-    }
-    
-    /* Selectbox e Input */
-    .stSelectbox label p {
-        color: #000000 !important;
-        font-weight: bold;
-    }
-    div[data-baseweb="select"] > div {
-        background-color: #FFFFFF !important;
-        color: #000000 !important;
-        border: 1px solid #CCCCCC !important;
-    }
-    
-    /* Tabelle */
-    .stDataFrame {
-        border: 1px solid #E0E0E0;
-    }
-    
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
-        background-color: #FFFFFF;
-        border-bottom: 1px solid #E0E0E0;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        background-color: #FFFFFF;
-        border-radius: 4px 4px 0px 0px;
-        color: #666666;
-        font-weight: 600;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #F0F2F6 !important;
-        color: #000000 !important;
-        border-top: 3px solid #FF4B4B;
-        border-bottom: 1px solid #F0F2F6;
-    }
+    .stApp { background-color: #FFFFFF; color: #31333F; }
+    [data-testid="stSidebar"] { background-color: #F8F9FA; border-right: 1px solid #E0E0E0; }
+    h1, h2, h3, h4, h5, h6 { color: #000000 !important; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-weight: 700; }
+    .stSelectbox label p { color: #000000 !important; font-weight: bold; }
+    div[data-baseweb="select"] > div { background-color: #FFFFFF !important; color: #000000 !important; border: 1px solid #CCCCCC !important; }
+    .stDataFrame { border: 1px solid #E0E0E0; }
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; background-color: #FFFFFF; border-bottom: 1px solid #E0E0E0; }
+    .stTabs [data-baseweb="tab"] { height: 50px; background-color: #FFFFFF; border-radius: 4px 4px 0px 0px; color: #666666; font-weight: 600; }
+    .stTabs [aria-selected="true"] { background-color: #F0F2F6 !important; color: #000000 !important; border-top: 3px solid #FF4B4B; border-bottom: 1px solid #F0F2F6; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -79,17 +29,17 @@ st.markdown("""
 @st.cache_data(show_spinner=False)
 def load_data(file):
     """
-    Caricamento Intelligente Universale:
-    1. Gestisce CSV (Sep ;/,) ed Excel (.xlsx).
-    2. Trova automaticamente la riga di Header (salta righe vuote).
-    3. Rileva se il file è Trasposto (Date in colonna) e lo ruota.
-    4. Gestisce formati numerici misti (EU/US).
+    Caricamento Intelligente & Blindato:
+    1. Gestisce CSV/Excel.
+    2. Trova Header ignorando righe vuote.
+    3. Rileva Trasposizione e PULISCE I DUPLICATI (Fix Crash).
+    4. Gestisce formati numerici misti.
     """
     df = None
     file.seek(0)
     is_excel = file.name.endswith('.xlsx')
     
-    # 1. LETTURA RAW (Senza assumere header o formato)
+    # 1. LETTURA RAW
     if is_excel:
         try:
             df = pd.read_excel(file, header=None)
@@ -97,20 +47,15 @@ def load_data(file):
             st.error(f"Errore Excel: {e}")
             return None
     else:
-        # Tentativi CSV (Encoding + Separatori)
         encodings = ['utf-8', 'latin1', 'cp1252']
         separators = [';', ','] 
-        
         for enc in encodings:
             for sep in separators:
                 try:
                     file.seek(0)
-                    # Legge tutto come testo/oggetto per non perdere dati
                     df = pd.read_csv(file, sep=sep, header=None, encoding=enc, engine='python')
-                    if df.shape[1] > 1: # Se ha creato colonne, è buono
-                        break
-                except:
-                    continue
+                    if df.shape[1] > 1: break
+                except: continue
             if df is not None: break
 
     if df is None:
@@ -118,8 +63,7 @@ def load_data(file):
         return None
 
     try:
-        # 2. RICERCA HEADER (Dove inizia la tabella?)
-        # Cerca la prima riga che contiene "DATE" o "DATA"
+        # 2. RICERCA HEADER
         header_idx = -1
         for i, row in df.iterrows():
             row_str = row.astype(str).str.lower()
@@ -127,45 +71,38 @@ def load_data(file):
                 header_idx = i
                 break
         
-        if header_idx == -1:
-            # Fallback: assume riga 0 se non trova nulla
-            header_idx = 0
+        if header_idx == -1: header_idx = 0
             
-        # Promuove la riga trovata a Intestazione
         df.columns = df.iloc[header_idx]
         df = df.iloc[header_idx+1:].reset_index(drop=True)
-        # Pulisce nomi colonne
+        # Forza nomi colonna a stringa e rimuove spazi
         df.columns = [str(c).strip() for c in df.columns]
 
-        # 3. RILEVAMENTO TRASPOSIZIONE (Il file è ruotato?)
-        # Se le colonne (dalla 2a in poi) sembrano date, il file è trasposto
+        # 3. RILEVAMENTO TRASPOSIZIONE
         is_transposed = False
         try:
-            sample_cols = df.columns[1:10] # Controlla le prime colonne dati
+            sample_cols = df.columns[1:10] 
             valid_dates = 0
             for c in sample_cols:
                 try:
                     pd.to_datetime(c, dayfirst=True)
                     valid_dates += 1
-                except:
-                    pass
-            # Se più del 50% delle colonne sono date, è trasposto
+                except: pass
             if len(sample_cols) > 0 and (valid_dates / len(sample_cols)) > 0.5:
                 is_transposed = True
-        except:
-            pass
+        except: pass
 
-        # 4. NORMALIZZAZIONE STRUTTURA
+        # 4. NORMALIZZAZIONE STRUTTURA (CON FIX DUPLICATI)
         if is_transposed:
-            # Imposta la prima colonna (Nomi Asset) come indice temporaneo
-            df = df.set_index(df.columns[0])
-            # Ruota la matrice
-            df = df.T
-            # Ora l'indice sono le Date, le Colonne sono gli Asset
-            df.index.name = 'DATE' # Rinomina indice per standardizzazione
-            df = df.reset_index() # Riporta DATE come colonna per il flusso standard
+            asset_col_name = df.columns[0]
+            df = df.dropna(subset=[asset_col_name])
+            df = df[df[asset_col_name].astype(str).str.strip() != '']
+            df = df.drop_duplicates(subset=[asset_col_name])
+            df = df.set_index(asset_col_name).T
+            df.index.name = 'DATE'
+            df = df.reset_index()
 
-        # 5. PARSING DATA E NUMERI (Logica Standard)
+        # 5. PARSING DATA
         date_col = None
         for col in df.columns:
             if 'date' in col.lower() or 'data' in col.lower():
@@ -176,24 +113,27 @@ def load_data(file):
             st.error("Colonna 'Date' non identificabile.")
             return None
 
-        # Conversione Data
         df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors='coerce')
         df = df.dropna(subset=[date_col])
         df.set_index(date_col, inplace=True)
-        df = df.loc[:, ~df.columns.str.contains('^Unnamed')] # Via colonne fantasma
-
-        # Conversione Numerica Robusta (Gestisce sia 1.000,00 che 1000.00)
-        for col in df.columns:
-            series = df[col].astype(str)
-            # Tenta conversione standard (US)
-            df[col] = pd.to_numeric(series, errors='coerce')
-            
-            # Se troppi NaN, tenta conversione EU (rimuovi punti, cambia virgola in punto)
-            if df[col].isna().sum() > len(df) * 0.5:
-                clean_series = series.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-                df[col] = pd.to_numeric(clean_series, errors='coerce')
         
-        # Riempimento buchi
+        df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+        df = df.loc[:, df.columns.notna()]
+
+        # 6. CONVERSIONE NUMERICA ROBUSTA
+        for col in df.columns:
+            if isinstance(df[col], pd.DataFrame):
+                series = df[col].iloc[:, 0].astype(str)
+            else:
+                series = df[col].astype(str)
+            
+            converted = pd.to_numeric(series, errors='coerce')
+            if converted.isna().sum() > len(df) * 0.5:
+                clean_series = series.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                converted = pd.to_numeric(clean_series, errors='coerce')
+            
+            df[col] = converted
+        
         df = df.fillna(method='ffill').dropna()
             
         return df
@@ -203,7 +143,7 @@ def load_data(file):
         return None
 
 def clean_asset_name(name):
-    clean = re.sub(r'\s*\(.*\)', '', name)
+    clean = re.sub(r'\s*\(.*\)', '', str(name))
     return clean.strip()
 
 def get_advanced_stats(weights, returns, annual_factor):
@@ -234,9 +174,7 @@ def get_avg_correlation(data, assets):
 
 def optimize_portfolio(returns, annual_factor, min_weight=0.0):
     n_assets = len(returns.columns)
-    
-    if n_assets * min_weight > 1.0:
-        return None 
+    if n_assets * min_weight > 1.0: return None 
         
     def objective(weights):
         w = np.array(weights)
@@ -252,8 +190,7 @@ def optimize_portfolio(returns, annual_factor, min_weight=0.0):
     try:
         result = minimize(objective, init_guess, method='SLSQP', bounds=bounds, constraints=constraints)
         return result.x
-    except:
-        return None
+    except: return None
 
 @st.cache_data(show_spinner=False)
 def find_best_optimized_combination(data, k, annual_factor, max_corr_threshold=1.0, min_w=0.0):
@@ -265,22 +202,19 @@ def find_best_optimized_combination(data, k, annual_factor, max_corr_threshold=1
     best_weights = None
     best_full_stats = None
     
-    if k * min_w > 1.0:
-        return None, None, (0,0,0,0,0)
+    if k * min_w > 1.0: return None, None, (0,0,0,0,0)
     
     if len(assets) > 15 and k > 2:
         st.warning("⚠️ Troppi asset per calcolo combinatorio completo. Analisi ridotta.")
 
     for combo in itertools.combinations(assets, k):
         current_corr = get_avg_correlation(data, combo)
-        
         if current_corr <= max_corr_threshold:
             subset = data[list(combo)].pct_change().dropna()
             weights = optimize_portfolio(subset, annual_factor, min_weight=min_w)
             
             if weights is not None:
                 r, v, s, sort, mdd = get_advanced_stats(weights, subset, annual_factor)
-                
                 if s > best_sharpe:
                     best_sharpe = s
                     best_combo = combo
@@ -302,7 +236,6 @@ def format_composition(assets, weights):
 
 st.title("🛡️ Quant Allocation: 3-Tier Model")
 
-# SIDEBAR
 with st.sidebar:
     st.header("1. Data Feed")
     uploaded_file = st.file_uploader("Carica Dati (CSV o Excel)", type=["csv", "xlsx"])
@@ -321,15 +254,8 @@ with st.sidebar:
     
     st.markdown("---")
     st.header("3. Filtri Strategici")
-    max_corr_input = st.slider(
-        "Max Correlazione Ammessa", 
-        min_value=0.0, max_value=1.0, value=1.0, step=0.05
-    )
-    
-    min_weight_pct = st.slider(
-        "Peso Minimo per Asset (%)",
-        min_value=0, max_value=33, value=10, step=1
-    )
+    max_corr_input = st.slider("Max Correlazione Ammessa", 0.0, 1.0, 1.0, 0.05)
+    min_weight_pct = st.slider("Peso Minimo per Asset (%)", 0, 33, 10, 1)
     min_weight_val = min_weight_pct / 100.0
 
 if uploaded_file is not None:
@@ -351,19 +277,13 @@ if uploaded_file is not None:
             
             best_single = max(temp_sharpes, key=temp_sharpes.get)
             
-            # UI Manuale
-            try:
-                default_idx = assets.index(best_single)
-            except:
-                default_idx = 0
+            try: default_idx = assets.index(best_single)
+            except: default_idx = 0
             manual_asset = manual_placeholder.selectbox("2. Linea 1 (Manuale)", assets, index=default_idx)
             
-            # Dati Linea 1
             l1_ret_frame = df[[manual_asset]].pct_change().dropna()
             l1_stats = get_advanced_stats([1], l1_ret_frame, annual_factor)
             l1_corr = 1.0
-            
-            # Floor Peso
             forced_min_w = max(min_weight_val, 0.01)
 
             # 2. Best Pair
@@ -385,11 +305,8 @@ if uploaded_file is not None:
         # --- TABS ---
         tab1, tab2, tab3, tab4 = st.tabs(["1️⃣ DASHBOARD", "2️⃣ CORRELAZIONI", "3️⃣ BACKTEST", "📘 METODOLOGIA"])
 
-        # --- TAB 1: DASHBOARD ---
         with tab1:
             st.subheader("Allocazione Ottimale")
-            
-            # Tabella Riepilogativa
             table_data = []
             def make_row(label, asset_list, weights, corr, stats):
                 r, v, s, sort, mdd = stats
@@ -402,19 +319,15 @@ if uploaded_file is not None:
                     "Rend. Annuo": f"{r*100:.1f}%",
                     "Max DD": f"{mdd*100:.1f}%",
                     "Sharpe": f"{s:.2f}",
+                    "Volatilità": f"{v*100:.1f}%"  # <--- AGGIUNTA QUI
                 }
             
             table_data.append(make_row("LINEA 1 (Manuale)", manual_asset, [1], l1_corr, l1_stats))
-            
-            if pair_assets: 
-                table_data.append(make_row("LINEA 2 (Best Pair)", pair_assets, pair_weights, l2_corr, pair_stats))
-            else: 
-                st.warning("LINEA 2: Nessuna combinazione soddisfa i vincoli.")
+            if pair_assets: table_data.append(make_row("LINEA 2 (Best Pair)", pair_assets, pair_weights, l2_corr, pair_stats))
+            else: st.warning("LINEA 2: Nessuna combinazione soddisfa i vincoli.")
                 
-            if triplet_assets: 
-                table_data.append(make_row("LINEA 3 (Best Triplet)", triplet_assets, triplet_weights, l3_corr, triplet_stats))
-            else:
-                 st.warning("LINEA 3: Nessuna combinazione soddisfa i vincoli.")
+            if triplet_assets: table_data.append(make_row("LINEA 3 (Best Triplet)", triplet_assets, triplet_weights, l3_corr, triplet_stats))
+            else: st.warning("LINEA 3: Nessuna combinazione soddisfa i vincoli.")
             
             st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
             
@@ -443,7 +356,6 @@ if uploaded_file is not None:
             if pair_assets: render_box(col2, "LINEA 2", "#1C83E1", pair_stats)
             if triplet_assets: render_box(col3, "LINEA 3", "#00C853", triplet_stats)
 
-        # --- TAB 2: CORRELAZIONI ---
         with tab2:
             st.subheader("Matrice di Correlazione")
             unique_assets = list(set([manual_asset] + list(pair_assets or []) + list(triplet_assets or [])))
@@ -451,7 +363,6 @@ if uploaded_file is not None:
             fig_corr = px.imshow(df[unique_assets].rename(columns=clean_labels).corr(), text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1, template='plotly_white')
             st.plotly_chart(fig_corr, use_container_width=True)
 
-        # --- TAB 3: BACKTEST ---
         with tab3:
             st.subheader("Simulazione Storica")
             common_idx = l1_ret_frame.index
@@ -467,16 +378,13 @@ if uploaded_file is not None:
             fig.update_layout(yaxis_title="Valore (Base 100)", legend=dict(orientation="h", y=1.1, title=None))
             st.plotly_chart(fig, use_container_width=True)
 
-        # --- TAB 4: METODOLOGIA ---
         with tab4:
             st.markdown("""
             ### Note Tecniche
-            * **Flessibilità Totale:** Supporta file Standard e Trasposti (Date in orizzontale).
-            * **Pulizia:** Rileva automaticamente l'intestazione anche se ci sono righe vuote.
+            * **Flessibilità Totale:** Supporta file Standard e Trasposti.
+            * **Robustezza:** Rimuove automaticamente asset duplicati o senza nome che causano crash.
             * **Numeri:** Supporta formati EU (1.000,00) e US (1000.00).
             """)
 
-    else:
-        st.error("File non valido.")
-else:
-    st.info("Carica il file (CSV o Excel) per iniziare.")
+    else: st.error("File non valido.")
+else: st.info("Carica il file (CSV o Excel) per iniziare.")
