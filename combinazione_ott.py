@@ -4,7 +4,7 @@ import numpy as np
 import itertools
 import plotly.express as px
 import re
-import io  # <--- AGGIUNTO PER GESTIRE L'EXPORT
+import io
 from scipy.optimize import minimize
 
 # --- CONFIGURAZIONE ---
@@ -22,6 +22,14 @@ st.markdown("""
     .stTabs [data-baseweb="tab-list"] { gap: 10px; background-color: #FFFFFF; border-bottom: 1px solid #E0E0E0; }
     .stTabs [data-baseweb="tab"] { height: 50px; background-color: #FFFFFF; border-radius: 4px 4px 0px 0px; color: #666666; font-weight: 600; }
     .stTabs [aria-selected="true"] { background-color: #F0F2F6 !important; color: #000000 !important; border-top: 3px solid #FF4B4B; border-bottom: 1px solid #F0F2F6; }
+    
+    /* Stile Pulsante Download */
+    div.stDownloadButton > button {
+        background-color: #007700 !important;
+        color: white !important;
+        font-weight: bold !important;
+        border: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -330,25 +338,25 @@ if uploaded_file is not None:
             if triplet_assets: table_data.append(make_row("LINEA 3 (Best Triplet)", triplet_assets, triplet_weights, l3_corr, triplet_stats))
             else: st.warning("LINEA 3: Nessuna combinazione soddisfa i vincoli.")
             
-            # DF Visualization
-            st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
-            
-            # --- PULSANTE EXPORT EXCEL ---
-            st.divider()
-            
+            # --- PULSANTE EXPORT EXCEL (ORA IN CIMA ALLA TABELLA) ---
             # Creazione del buffer Excel in memoria
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                # Scriviamo il dataframe table_data in un foglio Excel
                 pd.DataFrame(table_data).to_excel(writer, index=False, sheet_name='Report Allocazione')
-                
-            st.download_button(
-                label="📥 DOWNLOAD REPORT EXCEL",
-                data=buffer.getvalue(),
-                file_name="Report_Allocazione.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            
+            # Layout a due colonne per pulsante a destra
+            c1, c2 = st.columns([4, 1])
+            with c2:
+                st.download_button(
+                    label="📥 SCARICA REPORT EXCEL",
+                    data=buffer.getvalue(),
+                    file_name="Report_Allocazione.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
             # -----------------------------
+            
+            st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
             
             st.divider()
             st.markdown("### 📊 Performance vs Rischio")
