@@ -5,8 +5,6 @@ import itertools
 import plotly.express as px
 import re
 import io
-import openpyxl # Necessario per manipolare l'Excel a basso livello
-from openpyxl.drawing.image import Image as ExcelImage # Specifico per le immagini
 from scipy.optimize import minimize
 
 # --- CONFIGURAZIONE ---
@@ -43,7 +41,7 @@ def load_data(file):
     Caricamento Intelligente & Blindato:
     1. Gestisce CSV/Excel.
     2. Trova Header ignorando righe vuote.
-    3. Rileva Trasposizione e PULISCE I DUPLICATI.
+    3. Rileva Trasposizione e PULISCE I DUPLICATI (Fix Crash).
     4. Gestisce formati numerici misti.
     """
     df = None
@@ -340,67 +338,23 @@ if uploaded_file is not None:
             if triplet_assets: table_data.append(make_row("LINEA 3 (Best Triplet)", triplet_assets, triplet_weights, l3_corr, triplet_stats))
             else: st.warning("LINEA 3: Nessuna combinazione soddisfa i vincoli.")
             
-            # --- BLOCCO DOWNLOAD EXCEL (CON GRAFICO) ---
+            # --- PULSANTE EXPORT EXCEL (ORA IN CIMA ALLA TABELLA) ---
+            # Creazione del buffer Excel in memoria
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                pd.DataFrame(table_data).to_excel(writer, index=False, sheet_name='Report Allocazione')
             
-            # 1. Ricreazione Dati Grafico (Necessario farlo qui per inserirlo nell'excel)
-            try:
-                common_idx = l1_ret_frame.index
-                if pair_assets: common_idx = common_idx.intersection(l2_series.index)
-                if triplet_assets: common_idx = common_idx.intersection(l3_series.index)
-                
-                chart_df_export = pd.DataFrame(index=common_idx)
-                chart_df_export[f"L1: {clean_asset_name(manual_asset)}"] = (1 + l1_ret_frame.loc[common_idx][manual_asset]).cumprod() * 100
-                if pair_assets: chart_df_export["L2: Best Pair"] = (1 + l2_series.loc[common_idx]).cumprod() * 100
-                if triplet_assets: chart_df_export["L3: Best Triplet"] = (1 + l3_series.loc[common_idx]).cumprod() * 100
-                
-                # Creazione Figura (Nascosta)
-                fig_export = px.line(chart_df_export, x=chart_df_export.index, y=chart_df_export.columns, template='plotly_white')
-                fig_export.update_layout(title="Simulazione Backtest", yaxis_title="Base 100", legend=dict(orientation="h", y=-0.2))
-                
-                # Conversione in Immagine (Richiede 'kaleido')
-                img_bytes = fig_export.to_image(format="png", width=1200, height=700, scale=2)
-                img_stream = io.BytesIO(img_bytes)
-                
-                # Scrittura Excel
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    # Foglio 1: Dati
-                    pd.DataFrame(table_data).to_excel(writer, index=False, sheet_name='Report Allocazione')
-                    
-                    # Foglio 2: Grafico
-                    # Creiamo il foglio manualmente se non esiste tramite writer
-                    writer.book.create_sheet("Grafico Backtest")
-                    ws = writer.book["Grafico Backtest"]
-                    
-                    # Inserimento Immagine
-                    img = ExcelImage(img_stream)
-                    ws.add_image(img, 'A1')
-                    
-                download_data = buffer.getvalue()
-                disabled_btn = False
-                
-            except Exception as e:
-                # Fallback se manca kaleido o c'è un errore
-                st.warning(f"Grafico non incluso nell'Excel (Installa 'kaleido' per abilitarlo). Errore: {e}")
-                # Genera solo i dati
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    pd.DataFrame(table_data).to_excel(writer, index=False, sheet_name='Report Allocazione')
-                download_data = buffer.getvalue()
-                disabled_btn = False
-
-            # Layout Pulsante
+            # Layout a due colonne per pulsante a destra
             c1, c2 = st.columns([4, 1])
             with c2:
                 st.download_button(
-                    label="📥 DOWNLOAD REPORT + GRAFICO",
-                    data=download_data,
-                    file_name="Report_Allocazione_Completo.xlsx",
+                    label="📥 SCARICA REPORT EXCEL",
+                    data=buffer.getvalue(),
+                    file_name="Report_Allocazione.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    disabled=disabled_btn
+                    use_container_width=True
                 )
-            # -------------------------------------------
+            # -----------------------------
             
             st.dataframe(pd.DataFrame(table_data), hide_index=True, use_container_width=True)
             
