@@ -259,85 +259,9 @@ def format_composition(assets, weights):
     return " + ".join(items)
 
 def format_euro(amount):
-    """Formatta in stile Europeo: 100.000,00 €"""
+    """Formatta in stile Europeo per farsi leggere da Excel: € 100.000,00"""
     return f"€ {amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weights, triplet_assets, triplet_weights):
-    show_euro = euro_amount > 0
-    
-    style = """
-<style>
-.euro-allocation-container { padding: 20px; }
-.euro-allocation-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; border: 1px solid #E0E0E0; }
-.euro-allocation-table thead tr { border-bottom: 2px solid #E0E0E0; text-align: left; background-color: #F8F9FA; }
-.euro-allocation-table th { padding: 12px; color: #000000; }
-.euro-allocation-table tbody tr { border-bottom: 1px solid #E0E0E0; }
-.euro-allocation-table td { padding: 12px; }
-.table-line-header { font-weight: bold; color: #000000; }
-.table-sub-asset { color: #31333F; }
-</style>
-"""
-    
-    html_template = style + f"""
-<div class="euro-allocation-container">
-<table class="euro-allocation-table">
-<thead>
-<tr>
-<th>Linea</th>
-<th>Nome Asset</th>
-<th>ISIN</th>
-<th>Peso %</th>
-{'<th>Controvalore</th>' if show_euro else ''}
-</tr>
-</thead>
-<tbody>
-<tr>
-<td class="table-line-header">Linea 1</td>
-<td class="table-sub-asset">{clean_asset_name(manual_asset)}</td>
-<td>-</td>
-<td>100.0%</td>
-{f'<td>{format_euro(euro_amount)}</td>' if show_euro else ''}
-</tr>
-"""
-
-    if pair_assets is not None:
-        sorted_pair = sorted(zip(pair_assets, pair_weights), key=lambda x: x[1], reverse=True)
-        html_template += "\n"
-        for i, (a, w) in enumerate(sorted_pair):
-            euro_val = euro_amount * w
-            line_label = '<td class="table-line-header">Linea 2</td>' if i == 0 else '<td></td>'
-            html_template += f"""
-<tr>
-{line_label}
-<td class="table-sub-asset">{clean_asset_name(a)}</td>
-<td>-</td>
-<td>{w*100:.1f}%</td>
-{f'<td>{format_euro(euro_val)}</td>' if show_euro else ''}
-</tr>
-"""
-
-    if triplet_assets is not None:
-        sorted_triplet = sorted(zip(triplet_assets, triplet_weights), key=lambda x: x[1], reverse=True)
-        html_template += "\n"
-        for i, (a, w) in enumerate(sorted_triplet):
-            euro_val = euro_amount * w
-            line_label = '<td class="table-line-header">Linea 3</td>' if i == 0 else '<td></td>'
-            html_template += f"""
-<tr>
-{line_label}
-<td class="table-sub-asset">{clean_asset_name(a)}</td>
-<td>-</td>
-<td>{w*100:.1f}%</td>
-{f'<td>{format_euro(euro_val)}</td>' if show_euro else ''}
-</tr>
-"""
-
-    html_template += """
-</tbody>
-</table>
-</div>
-"""
-    return html_template
 
 # --- UI APPLICAZIONE ---
 
@@ -371,23 +295,23 @@ if uploaded_file is not None:
     if df is not None and not df.empty:
         assets = df.columns.tolist()
         
+        # Calcolo preliminare fuori dallo spinner per stabilità UI
+        temp_sharpes = {}
+        for a in assets:
+            r_t = df[[a]].pct_change().dropna()
+            if not r_t.empty:
+                _, _, s_t, _, _ = get_advanced_stats([1], r_t, annual_factor)
+                temp_sharpes[a] = s_t
+            else:
+                temp_sharpes[a] = -999
+        
+        best_single = max(temp_sharpes, key=temp_sharpes.get)
+        
+        try: default_idx = assets.index(best_single)
+        except: default_idx = 0
+        manual_asset = manual_placeholder.selectbox("2. Linea 1 (Manuale)", assets, index=default_idx)
+        
         with st.spinner('Calcolo Ottimizzazione e Analisi Metodologica...'):
-            # 1. Best Single Asset
-            temp_sharpes = {}
-            for a in assets:
-                r_t = df[[a]].pct_change().dropna()
-                if not r_t.empty:
-                    _, _, s_t, _, _ = get_advanced_stats([1], r_t, annual_factor)
-                    temp_sharpes[a] = s_t
-                else:
-                    temp_sharpes[a] = -999
-            
-            best_single = max(temp_sharpes, key=temp_sharpes.get)
-            
-            try: default_idx = assets.index(best_single)
-            except: default_idx = 0
-            manual_asset = manual_placeholder.selectbox("2. Linea 1 (Manuale)", assets, index=default_idx)
-            
             l1_ret_frame = df[[manual_asset]].pct_change().dropna()
             l1_stats = get_advanced_stats([1], l1_ret_frame, annual_factor)
             l1_corr = 1.0
@@ -523,16 +447,63 @@ if uploaded_file is not None:
 
             st.divider()
             
-            html_string = generate_allocation_html(
-                euro_amount, 
-                manual_asset, 
-                pair_assets, 
-                pair_weights, 
-                triplet_assets, 
-                triplet_weights
-            )
+            show_euro = euro_amount > 0
+            alloc_data = []
+
+            # Costruzione Dati per Tabella Dataframe
             
-            st.markdown(html_string, unsafe_allow_html=True)
+            # Linea 1
+            alloc_data.append({
+                "Linea": "LINEA 1",
+                "Nome Asset": clean_asset_name(manual_asset),
+                "ISIN": "-",
+                "Peso %": "100.0%",
+                **({"Controvalore": format_euro(euro_amount)} if show_euro else {})
+            })
+
+            # Linea 2
+            if pair_assets is not None:
+                sorted_pair = sorted(zip(pair_assets, pair_weights), key=lambda x: x[1], reverse=True)
+                for i, (a, w) in enumerate(sorted_pair):
+                    alloc_data.append({
+                        "Linea": "LINEA 2" if i == 0 else "",
+                        "Nome Asset": clean_asset_name(a),
+                        "ISIN": "-",
+                        "Peso %": f"{w*100:.1f}%",
+                        **({"Controvalore": format_euro(euro_amount * w)} if show_euro else {})
+                    })
+
+            # Linea 3
+            if triplet_assets is not None:
+                sorted_triplet = sorted(zip(triplet_assets, triplet_weights), key=lambda x: x[1], reverse=True)
+                for i, (a, w) in enumerate(sorted_triplet):
+                    alloc_data.append({
+                        "Linea": "LINEA 3" if i == 0 else "",
+                        "Nome Asset": clean_asset_name(a),
+                        "ISIN": "-",
+                        "Peso %": f"{w*100:.1f}%",
+                        **({"Controvalore": format_euro(euro_amount * w)} if show_euro else {})
+                    })
+
+            df_alloc = pd.DataFrame(alloc_data)
+            
+            # --- PULSANTE EXPORT EXCEL ---
+            buffer_euro = io.BytesIO()
+            with pd.ExcelWriter(buffer_euro, engine='openpyxl') as writer:
+                df_alloc.to_excel(writer, index=False, sheet_name='Dettaglio_Allocazione')
+            
+            col_d1, col_d2 = st.columns([4, 1])
+            with col_d2:
+                st.download_button(
+                    label="📥 SCARICA DETTAGLIO EXCEL",
+                    data=buffer_euro.getvalue(),
+                    file_name="Dettaglio_Allocazione_Euro.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            
+            # Tabella interattiva e copiativa
+            st.dataframe(df_alloc, hide_index=True, use_container_width=True)
 
     else: st.error("File non valido.")
 else: st.info("Carica il file (CSV o Excel) per iniziare.")
