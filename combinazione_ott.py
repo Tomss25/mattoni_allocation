@@ -275,8 +275,6 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 .euro-allocation-table td { padding: 12px; }
 .table-line-header { font-weight: bold; color: #000000; }
 .table-sub-asset { color: #31333F; }
-.table-total-label { text-transform: uppercase; color: #666666; font-weight: bold; font-size: 13px; }
-.table-total-value { font-weight: bold; color: #000000; }
 </style>
 """
     
@@ -300,13 +298,6 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 <td>100.0%</td>
 {f'<td>{format_euro(euro_amount)}</td>' if show_euro else ''}
 </tr>
-<tr>
-<td></td>
-<td class="table-total-label">TOTALE LINEA 1</td>
-<td></td>
-<td class="table-total-value">100.0%</td>
-{f'<td class="table-total-value">{format_euro(euro_amount)}</td>' if show_euro else ''}
-</tr>
 """
 
     if pair_assets is not None:
@@ -322,15 +313,6 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 <td>-</td>
 <td>{w*100:.1f}%</td>
 {f'<td>{format_euro(euro_val)}</td>' if show_euro else ''}
-</tr>
-"""
-        html_template += f"""
-<tr>
-<td></td>
-<td class="table-total-label">TOTALE LINEA 2</td>
-<td></td>
-<td class="table-total-value">100.0%</td>
-{f'<td class="table-total-value">{format_euro(euro_amount)}</td>' if show_euro else ''}
 </tr>
 """
 
@@ -349,15 +331,6 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 {f'<td>{format_euro(euro_val)}</td>' if show_euro else ''}
 </tr>
 """
-        html_template += f"""
-<tr>
-<td></td>
-<td class="table-total-label">TOTALE LINEA 3</td>
-<td></td>
-<td class="table-total-value">100.0%</td>
-{f'<td class="table-total-value">{format_euro(euro_amount)}</td>' if show_euro else ''}
-</tr>
-"""
 
     html_template += """
 </tbody>
@@ -365,7 +338,6 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 </div>
 """
     return html_template
-
 
 # --- UI APPLICAZIONE ---
 
