@@ -11,25 +11,86 @@ import warnings
 # --- CONFIGURAZIONE ---
 st.set_page_config(page_title="Asset Allocation: Light Executive", layout="wide")
 
-# --- STYLING CSS AVANZATO ---
+# --- STYLING CSS AVANZATO (LIGHT MODE - EXECUTIVE STYLE) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #FFFFFF; color: #31333F; }
-    [data-testid="stSidebar"] { background-color: #F8F9FA; border-right: 1px solid #E0E0E0; }
-    h1, h2, h3, h4, h5, h6 { color: #000000 !important; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-weight: 700; }
-    .stSelectbox label p { color: #000000 !important; font-weight: bold; }
-    div[data-baseweb="select"] > div { background-color: #FFFFFF !important; color: #000000 !important; border: 1px solid #CCCCCC !important; }
-    .stDataFrame { border: 1px solid #E0E0E0; }
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; background-color: #FFFFFF; border-bottom: 1px solid #E0E0E0; }
-    .stTabs [data-baseweb="tab"] { height: 50px; background-color: #FFFFFF; border-radius: 4px 4px 0px 0px; color: #666666; font-weight: 600; }
-    .stTabs [aria-selected="true"] { background-color: #F0F2F6 !important; color: #000000 !important; border-top: 3px solid #FF4B4B; border-bottom: 1px solid #F0F2F6; }
+    /* Sfondo Principale - Bianco Pulito */
+    .stApp {
+        background-color: #FFFFFF;
+        color: #31333F;
+    }
     
-    /* Stile Pulsante Download */
-    div.stDownloadButton > button {
-        background-color: #007700 !important;
-        color: white !important;
-        font-weight: bold !important;
-        border: none !important;
+    /* Sidebar - Grigio Tenue Professionale */
+    [data-testid="stSidebar"] {
+        background-color: #F8F9FA;
+        border-right: 1px solid #E0E0E0;
+    }
+    
+    /* Testi e Header - Nero/Grigio Scuro per massimo contrasto */
+    h1, h2, h3, h4, h5, h6 {
+        color: #000000 !important;
+        font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+    }
+    
+    p, div, label, li {
+        color: #31333F;
+    }
+    
+    /* --- CUSTOMIZZAZIONE SELECTBOX (Sidebar) --- */
+    .stSelectbox label p {
+        color: #000000 !important; /* Label nera */
+        font-weight: bold;
+    }
+    div[data-baseweb="select"] > div {
+        background-color: #FFFFFF !important;
+        color: #000000 !important;
+        border: 1px solid #CCCCCC !important;
+    }
+    
+    /* Tabelle (DataFrame) - Stile Excel Pulito */
+    .stDataFrame {
+        border: 1px solid #E0E0E0;
+    }
+    [data-testid="stDataFrameResizable"] {
+        background-color: #FFFFFF;
+    }
+    
+    /* Tabs - Stile Moderno Chiaro */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        background-color: #FFFFFF;
+        border-bottom: 1px solid #E0E0E0;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #FFFFFF;
+        border-radius: 4px 4px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        color: #666666;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #F0F2F6 !important;
+        color: #000000 !important;
+        border-top: 3px solid #FF4B4B; /* Highlight Rosso Streamlit o Blu Corporate */
+        border-bottom: 1px solid #F0F2F6;
+    }
+
+    /* Divisori */
+    hr {
+        border-color: #E0E0E0;
+    }
+    
+    /* Messaggi di Alert */
+    .stAlert {
+        background-color: #F0F2F6;
+        color: #31333F;
+        border: 1px solid #D1D1D1;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -44,7 +105,6 @@ def load_data(file):
     2. Trova Header ignorando righe vuote.
     3. Rileva Trasposizione e PULISCE I DUPLICATI.
     4. Gestisce formati numerici misti.
-    5. INTERPOLA I VALORI "UNDEFINED".
     """
     df = None
     file.seek(0)
@@ -131,42 +191,21 @@ def load_data(file):
         df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
         df = df.loc[:, df.columns.notna()]
 
-        # 6. CONVERSIONE NUMERICA ROBUSTA E FIX "UNDEFINED"
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            for col in df.columns:
-                if isinstance(df[col], pd.DataFrame):
-                    series = df[col].iloc[:, 0].astype(str)
-                else:
-                    series = df[col].astype(str)
-                
-                # Cerca specificamente la parola "undefined" e forza la conversione in Not A Number (NaN)
-                series = series.replace(r'(?i)undefined', np.nan, regex=True)
-                
-                converted = pd.to_numeric(series, errors='coerce')
-                if converted.isna().sum() > len(df) * 0.5:
-                    clean_series = series.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-                    converted = pd.to_numeric(clean_series, errors='coerce')
-                
-                # Motore di interpolazione richiesto
-                vals = converted.values
-                n = len(vals)
-                
-                for i in range(n):
-                    if pd.isna(vals[i]):
-                        if i == 0 and n >= 3:
-                            # Primo elemento: media dei successivi due
-                            vals[i] = np.nanmean([vals[1], vals[2]])
-                        elif i == n - 1 and n >= 3:
-                            # Ultimo elemento: media dei precedenti due
-                            vals[i] = np.nanmean([vals[i-1], vals[i-2]])
-                        elif 0 < i < n - 1:
-                            # Elemento centrale: media tra precedente e successivo
-                            vals[i] = np.nanmean([vals[i-1], vals[i+1]])
-                
-                df[col] = vals
+        # 6. CONVERSIONE NUMERICA ROBUSTA
+        for col in df.columns:
+            if isinstance(df[col], pd.DataFrame):
+                series = df[col].iloc[:, 0].astype(str)
+            else:
+                series = df[col].astype(str)
+            
+            converted = pd.to_numeric(series, errors='coerce')
+            if converted.isna().sum() > len(df) * 0.5:
+                clean_series = series.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                converted = pd.to_numeric(clean_series, errors='coerce')
+            
+            df[col] = converted
         
-        # Chiusura di sicurezza per eventuali buchi consecutivi massivi non risolvibili
+        # Pulisci NA per calcoli
         df = df.ffill().bfill().dropna()
             
         return df
@@ -176,6 +215,7 @@ def load_data(file):
         return None
 
 def clean_asset_name(name):
+    """Rimuove il rumore dal nome dell'asset."""
     clean = re.sub(r'\s*\(.*\)', '', str(name))
     return clean.strip()
 
@@ -265,6 +305,166 @@ def format_composition(assets, weights):
             items.append(f"{clean_name} ({w*100:.0f}%)")
     return " + ".join(items)
 
+def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weights, triplet_assets, triplet_weights):
+    """Genera l'HTML per la tabella di allocazione grouped as per user image."""
+    
+    style = """
+<style>
+/* Euro Allocation Table Styling */
+.euro-allocation-container {
+    padding: 20px;
+}
+.euro-allocation-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    font-size: 14px;
+    border: 1px solid #E0E0E0;
+}
+.euro-allocation-table thead tr {
+    border-bottom: 2px solid #E0E0E0;
+    text-align: left;
+    background-color: #F8F9FA;
+}
+.euro-allocation-table th {
+    padding: 12px;
+    color: #000000;
+}
+.euro-allocation-table tbody tr {
+    border-bottom: 1px solid #E0E0E0;
+}
+.euro-allocation-table td {
+    padding: 12px;
+}
+
+/* Classes for hierarchical structure */
+.table-line-header {
+    font-weight: bold;
+    color: #000000;
+}
+.table-sub-asset {
+    color: #31333F;
+}
+.table-total-label {
+    text-transform: uppercase;
+    color: #666666;
+    font-weight: bold;
+    font-size: 13px;
+}
+.table-total-value {
+    font-weight: bold;
+    color: #000000;
+}
+</style>
+"""
+    
+    html_template = style + f"""
+<div class="euro-allocation-container">
+<table class="euro-allocation-table">
+  <thead>
+    <tr>
+      <th>Linea</th>
+      <th>Nome Asset</th>
+      <th>ISIN</th>
+      <th>Peso %</th>
+      <th>Controvalore (€)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="table-line-header">Linea 1</td>
+      <td class="table-sub-asset">...</td>
+      <td></td>
+      <td class="table-total-value">100.0%</td>
+      <td class="table-total-value">€ {euro_amount:,.2f}</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td class="table-sub-asset">{clean_asset_name(manual_asset)}</td>
+      <td>-</td>
+      <td>100.0%</td>
+      <td>€ {euro_amount:,.2f}</td>
+    </tr>
+    
+    """
+
+    # LINEA 2
+    if pair_assets is not None:
+        sorted_pair = sorted(zip(pair_assets, pair_weights), key=lambda x: x[1], reverse=True)
+        
+        html_template += f"""
+    <tr>
+      <td class="table-line-header">Linea 2</td>
+      <td class="table-sub-asset">...</td>
+      <td></td>
+      <td class="table-total-value">100.0%</td>
+      <td class="table-total-value">€ {euro_amount:,.2f}</td>
+    </tr>
+    """
+        for a, w in sorted_pair:
+            euro_val = euro_amount * w
+            html_template += f"""
+    <tr>
+      <td></td>
+      <td class="table-sub-asset">{clean_asset_name(a)}</td>
+      <td>-</td>
+      <td>{w*100:.1f}%</td>
+      <td>€ {euro_val:,.2f}</td>
+    </tr>
+    """
+        
+        html_template += f"""
+    <tr>
+      <td></td>
+      <td class="table-total-label">TOTALE LINEA 2</td>
+      <td></td>
+      <td class="table-total-value">100.0%</td>
+      <td class="table-total-value">€ {euro_amount:,.2f}</td>
+    </tr>
+    """
+
+    # LINEA 3
+    if triplet_assets is not None:
+        sorted_triplet = sorted(zip(triplet_assets, triplet_weights), key=lambda x: x[1], reverse=True)
+        
+        html_template += f"""
+    <tr>
+      <td class="table-line-header">Linea 3</td>
+      <td class="table-sub-asset">...</td>
+      <td></td>
+      <td class="table-total-value">100.0%</td>
+      <td class="table-total-value">€ {euro_amount:,.2f}</td>
+    </tr>
+    """
+        for a, w in sorted_triplet:
+            euro_val = euro_amount * w
+            html_template += f"""
+    <tr>
+      <td></td>
+      <td class="table-sub-asset">{clean_asset_name(a)}</td>
+      <td>-</td>
+      <td>{w*100:.1f}%</td>
+      <td>€ {euro_val:,.2f}</td>
+    </tr>
+    """
+            
+        html_template += f"""
+    <tr>
+      <td></td>
+      <td class="table-total-label">TOTALE LINEA 3</td>
+      <td></td>
+      <td class="table-total-value">100.0%</td>
+      <td class="table-total-value">€ {euro_amount:,.2f}</td>
+    </tr>
+    """
+
+    html_template += """
+  </tbody>
+</table>
+</div>
+"""
+    return html_template
+
 # --- UI APPLICAZIONE ---
 
 st.title("🛡️ Quant Allocation: 3-Tier Model")
@@ -336,7 +536,7 @@ if uploaded_file is not None:
                 l3_series = df[list(triplet_assets)].pct_change().dropna().dot(triplet_weights)
 
         # --- TABS ---
-        tab1, tab2, tab3, tab4 = st.tabs(["1️⃣ DASHBOARD", "2️⃣ CORRELAZIONI", "3️⃣ BACKTEST", "📘 METODOLOGIA"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["1️⃣ DASHBOARD", "2️⃣ CORRELAZIONI", "3️⃣ BACKTEST", "📘 METODOLOGIA", "5️⃣ ALLOCAZIONE EURO"])
 
         with tab1:
             st.subheader("Allocazione Ottimale")
@@ -433,8 +633,36 @@ if uploaded_file is not None:
             * **Flessibilità Totale:** Supporta file Standard e Trasposti.
             * **Robustezza:** Rimuove automaticamente asset duplicati o senza nome che causano crash.
             * **Numeri:** Supporta formati EU (1.000,00) e US (1000.00).
-            * **Correzioni:** Interpola dinamicamente valori mancanti o "undefined".
             """)
+            
+        with tab5:
+            st.subheader("🧮 Calcolatore di Allocazione Portfolio in Euro")
+            st.markdown("Inserisci il valore totale del tuo portfolio in Euro per calcolare l'allocazione automatica tra le diverse linee.")
+            
+            c1, c2 = st.columns([2, 2])
+            with c1:
+                euro_amount = st.number_input(
+                    "Controvalore del Portfolio in Euro (€)", 
+                    min_value=1000, 
+                    max_value=10_000_000, 
+                    value=100_000, 
+                    step=10_000
+                )
+
+            st.divider()
+            
+            # Genera la tabella HTML gerarchica come da foto
+            html_string = generate_allocation_html(
+                euro_amount, 
+                manual_asset, 
+                pair_assets, 
+                pair_weights, 
+                triplet_assets, 
+                triplet_weights
+            )
+            
+            # Visualizza la tabella
+            st.markdown(html_string, unsafe_allow_html=True)
 
     else: st.error("File non valido.")
 else: st.info("Carica il file (CSV o Excel) per iniziare.")
