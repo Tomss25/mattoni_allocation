@@ -6,6 +6,7 @@ import plotly.express as px
 import re
 import io
 from scipy.optimize import minimize
+import warnings
 
 # --- CONFIGURAZIONE ---
 st.set_page_config(page_title="Asset Allocation: Light Executive", layout="wide")
@@ -41,8 +42,9 @@ def load_data(file):
     Caricamento Intelligente & Blindato:
     1. Gestisce CSV/Excel.
     2. Trova Header ignorando righe vuote.
-    3. Rileva Trasposizione e PULISCE I DUPLICATI (Fix Crash).
+    3. Rileva Trasposizione e PULISCE I DUPLICATI.
     4. Gestisce formati numerici misti.
+    5. INTERPOLA I VALORI "UNDEFINED".
     """
     df = None
     file.seek(0)
@@ -101,7 +103,7 @@ def load_data(file):
                 is_transposed = True
         except: pass
 
-        # 4. NORMALIZZAZIONE STRUTTURA (CON FIX DUPLICATI)
+        # 4. NORMALIZZAZIONE STRUTTURA
         if is_transposed:
             asset_col_name = df.columns[0]
             df = df.dropna(subset=[asset_col_name])
@@ -129,21 +131,43 @@ def load_data(file):
         df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
         df = df.loc[:, df.columns.notna()]
 
-        # 6. CONVERSIONE NUMERICA ROBUSTA
-        for col in df.columns:
-            if isinstance(df[col], pd.DataFrame):
-                series = df[col].iloc[:, 0].astype(str)
-            else:
-                series = df[col].astype(str)
-            
-            converted = pd.to_numeric(series, errors='coerce')
-            if converted.isna().sum() > len(df) * 0.5:
-                clean_series = series.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-                converted = pd.to_numeric(clean_series, errors='coerce')
-            
-            df[col] = converted
+        # 6. CONVERSIONE NUMERICA ROBUSTA E FIX "UNDEFINED"
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            for col in df.columns:
+                if isinstance(df[col], pd.DataFrame):
+                    series = df[col].iloc[:, 0].astype(str)
+                else:
+                    series = df[col].astype(str)
+                
+                # Cerca specificamente la parola "undefined" e forza la conversione in Not A Number (NaN)
+                series = series.replace(r'(?i)undefined', np.nan, regex=True)
+                
+                converted = pd.to_numeric(series, errors='coerce')
+                if converted.isna().sum() > len(df) * 0.5:
+                    clean_series = series.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                    converted = pd.to_numeric(clean_series, errors='coerce')
+                
+                # Motore di interpolazione richiesto
+                vals = converted.values
+                n = len(vals)
+                
+                for i in range(n):
+                    if pd.isna(vals[i]):
+                        if i == 0 and n >= 3:
+                            # Primo elemento: media dei successivi due
+                            vals[i] = np.nanmean([vals[1], vals[2]])
+                        elif i == n - 1 and n >= 3:
+                            # Ultimo elemento: media dei precedenti due
+                            vals[i] = np.nanmean([vals[i-1], vals[i-2]])
+                        elif 0 < i < n - 1:
+                            # Elemento centrale: media tra precedente e successivo
+                            vals[i] = np.nanmean([vals[i-1], vals[i+1]])
+                
+                df[col] = vals
         
-        df = df.fillna(method='ffill').dropna()
+        # Chiusura di sicurezza per eventuali buchi consecutivi massivi non risolvibili
+        df = df.ffill().bfill().dropna()
             
         return df
 
@@ -338,13 +362,11 @@ if uploaded_file is not None:
             if triplet_assets: table_data.append(make_row("LINEA 3 (Best Triplet)", triplet_assets, triplet_weights, l3_corr, triplet_stats))
             else: st.warning("LINEA 3: Nessuna combinazione soddisfa i vincoli.")
             
-            # --- PULSANTE EXPORT EXCEL (ORA IN CIMA ALLA TABELLA) ---
-            # Creazione del buffer Excel in memoria
+            # --- PULSANTE EXPORT EXCEL ---
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 pd.DataFrame(table_data).to_excel(writer, index=False, sheet_name='Report Allocazione')
             
-            # Layout a due colonne per pulsante a destra
             c1, c2 = st.columns([4, 1])
             with c2:
                 st.download_button(
@@ -411,6 +433,7 @@ if uploaded_file is not None:
             * **Flessibilità Totale:** Supporta file Standard e Trasposti.
             * **Robustezza:** Rimuove automaticamente asset duplicati o senza nome che causano crash.
             * **Numeri:** Supporta formati EU (1.000,00) e US (1000.00).
+            * **Correzioni:** Interpola dinamicamente valori mancanti o "undefined".
             """)
 
     else: st.error("File non valido.")
