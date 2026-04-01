@@ -489,11 +489,12 @@ if uploaded_file is not None:
 
             df_alloc = pd.DataFrame(alloc_data)
             
-            # Motore Styler per iniettare il CSS della linea spessa sull'ultima riga di ogni blocco
+            # --- STYLER PER LA WEB APP ---
             def apply_borders(x):
                 df_style = pd.DataFrame('', index=x.index, columns=x.columns)
                 for idx in last_row_indices:
-                    df_style.iloc[idx] = 'border-bottom: 2px solid #888888;'
+                    # Inietta il CSS solo nella vista Web per mantenere intatto il dataframe grezzo per Excel
+                    df_style.iloc[idx] = 'border-bottom: 2px solid #888888;' 
                 return df_style
                 
             styled_df = df_alloc.style.apply(apply_borders, axis=None)
@@ -513,7 +514,7 @@ if uploaded_file is not None:
                     use_container_width=True
                 )
             
-            # Tabella interattiva con stile
+            # Tabella interattiva e formattata (solo per Web)
             st.dataframe(styled_df, hide_index=True, use_container_width=True)
 
     else: st.error("File non valido.")
