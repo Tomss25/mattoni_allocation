@@ -260,6 +260,7 @@ def format_composition(assets, weights):
 
 def format_euro(amount):
     """Formatta in stile Europeo per farsi leggere da Excel: € 100.000,00"""
+    if amount == "": return ""
     return f"€ {amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
@@ -449,8 +450,9 @@ if uploaded_file is not None:
             
             show_euro = euro_amount > 0
             alloc_data = []
-            last_row_indices = []
 
+            # Costruzione Dati per Tabella Dataframe
+            
             # Linea 1
             alloc_data.append({
                 "Linea": "LINEA 1",
@@ -459,7 +461,9 @@ if uploaded_file is not None:
                 "Peso %": "100,0%",
                 **({"Controvalore": format_euro(euro_amount)} if show_euro else {})
             })
-            last_row_indices.append(len(alloc_data) - 1)
+            
+            # Riga spaziatrice dopo Linea 1
+            alloc_data.append({k: "" for k in alloc_data[0].keys()})
 
             # Linea 2
             if pair_assets is not None:
@@ -472,7 +476,8 @@ if uploaded_file is not None:
                         "Peso %": f"{w*100:.1f}%".replace(".", ","),
                         **({"Controvalore": format_euro(euro_amount * w)} if show_euro else {})
                     })
-                last_row_indices.append(len(alloc_data) - 1)
+                # Riga spaziatrice dopo Linea 2
+                alloc_data.append({k: "" for k in alloc_data[0].keys()})
 
             # Linea 3
             if triplet_assets is not None:
@@ -485,18 +490,8 @@ if uploaded_file is not None:
                         "Peso %": f"{w*100:.1f}%".replace(".", ","),
                         **({"Controvalore": format_euro(euro_amount * w)} if show_euro else {})
                     })
-                last_row_indices.append(len(alloc_data) - 1)
 
             df_alloc = pd.DataFrame(alloc_data)
-            
-            # Motore Styler per iniettare il CSS della linea spessa sull'ultima riga di ogni blocco
-            def apply_borders(x):
-                df_style = pd.DataFrame('', index=x.index, columns=x.columns)
-                for idx in last_row_indices:
-                    df_style.iloc[idx] = 'border-bottom: 2px solid #888888;'
-                return df_style
-                
-            styled_df = df_alloc.style.apply(apply_borders, axis=None)
             
             # --- PULSANTE EXPORT EXCEL ---
             buffer_euro = io.BytesIO()
@@ -513,8 +508,8 @@ if uploaded_file is not None:
                     use_container_width=True
                 )
             
-            # Tabella interattiva con stile
-            st.dataframe(styled_df, hide_index=True, use_container_width=True)
+            # Tabella interattiva e copiativa (nuda e cruda)
+            st.dataframe(df_alloc, hide_index=True, use_container_width=True)
 
     else: st.error("File non valido.")
 else: st.info("Carica il file (CSV o Excel) per iniziare.")
