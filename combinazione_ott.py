@@ -263,6 +263,8 @@ def format_euro(amount):
     return f"€ {amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weights, triplet_assets, triplet_weights):
+    show_euro = euro_amount > 0
+    
     style = """
 <style>
 .euro-allocation-container { padding: 20px; }
@@ -287,7 +289,7 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 <th>Nome Asset</th>
 <th>ISIN</th>
 <th>Peso %</th>
-<th>Controvalore</th>
+{'<th>Controvalore</th>' if show_euro else ''}
 </tr>
 </thead>
 <tbody>
@@ -296,14 +298,14 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 <td class="table-sub-asset">{clean_asset_name(manual_asset)}</td>
 <td>-</td>
 <td>100.0%</td>
-<td>{format_euro(euro_amount)}</td>
+{f'<td>{format_euro(euro_amount)}</td>' if show_euro else ''}
 </tr>
 <tr>
 <td></td>
 <td class="table-total-label">TOTALE LINEA 1</td>
 <td></td>
 <td class="table-total-value">100.0%</td>
-<td class="table-total-value">{format_euro(euro_amount)}</td>
+{f'<td class="table-total-value">{format_euro(euro_amount)}</td>' if show_euro else ''}
 </tr>
 """
 
@@ -319,7 +321,7 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 <td class="table-sub-asset">{clean_asset_name(a)}</td>
 <td>-</td>
 <td>{w*100:.1f}%</td>
-<td>{format_euro(euro_val)}</td>
+{f'<td>{format_euro(euro_val)}</td>' if show_euro else ''}
 </tr>
 """
         html_template += f"""
@@ -328,7 +330,7 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 <td class="table-total-label">TOTALE LINEA 2</td>
 <td></td>
 <td class="table-total-value">100.0%</td>
-<td class="table-total-value">{format_euro(euro_amount)}</td>
+{f'<td class="table-total-value">{format_euro(euro_amount)}</td>' if show_euro else ''}
 </tr>
 """
 
@@ -344,7 +346,7 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 <td class="table-sub-asset">{clean_asset_name(a)}</td>
 <td>-</td>
 <td>{w*100:.1f}%</td>
-<td>{format_euro(euro_val)}</td>
+{f'<td>{format_euro(euro_val)}</td>' if show_euro else ''}
 </tr>
 """
         html_template += f"""
@@ -353,7 +355,7 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 <td class="table-total-label">TOTALE LINEA 3</td>
 <td></td>
 <td class="table-total-value">100.0%</td>
-<td class="table-total-value">{format_euro(euro_amount)}</td>
+{f'<td class="table-total-value">{format_euro(euro_amount)}</td>' if show_euro else ''}
 </tr>
 """
 
@@ -541,9 +543,9 @@ if uploaded_file is not None:
             with c1:
                 euro_amount = st.number_input(
                     "Controvalore del Portfolio in Euro (€)", 
-                    min_value=1000, 
+                    min_value=0, 
                     max_value=100_000_000, 
-                    value=100_000, 
+                    value=0, 
                     step=10_000
                 )
 
