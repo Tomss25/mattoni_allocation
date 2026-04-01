@@ -255,6 +255,7 @@ def format_composition(assets, weights):
     for a, w in sorted_pairs:
         if w > 0.001: 
             clean_name = clean_asset_name(a)
+            # Qui non mettiamo la virgola perché non ci sono decimali (es. 88%)
             items.append(f"{clean_name} ({w*100:.0f}%)")
     return " + ".join(items)
 
@@ -346,11 +347,11 @@ if uploaded_file is not None:
                 return {
                     "Strategia": label,
                     "Allocazione Sintetica": comp_str,
-                    "Corr. Media": f"{corr:.2f}" if isinstance(corr, float) else "N/A",
-                    "Rend. Annuo": f"{r*100:.1f}%",
-                    "Max DD": f"{mdd*100:.1f}%",
-                    "Sharpe": f"{s:.2f}",
-                    "Volatilità": f"{v*100:.1f}%"
+                    "Corr. Media": f"{corr:.2f}".replace(".", ",") if isinstance(corr, float) else "N/A",
+                    "Rend. Annuo": f"{r*100:.1f}%".replace(".", ","),
+                    "Max DD": f"{mdd*100:.1f}%".replace(".", ","),
+                    "Sharpe": f"{s:.2f}".replace(".", ","),
+                    "Volatilità": f"{v*100:.1f}%".replace(".", ",")
                 }
             
             table_data.append(make_row("LINEA 1 (Manuale)", manual_asset, [1], l1_corr, l1_stats))
@@ -396,7 +397,7 @@ if uploaded_file is not None:
             """
             def render_box(col, title, color, stats):
                 r, v, s, sort, mdd = stats
-                col.markdown(box_style.format(title=title, color=color, sharpe=f"{s:.2f}", ret=f"{r*100:.1f}%", mdd=f"{mdd*100:.1f}%", sort=f"{sort:.2f}"), unsafe_allow_html=True)
+                col.markdown(box_style.format(title=title, color=color, sharpe=f"{s:.2f}".replace(".", ","), ret=f"{r*100:.1f}%".replace(".", ","), mdd=f"{mdd*100:.1f}%".replace(".", ","), sort=f"{sort:.2f}".replace(".", ",")), unsafe_allow_html=True)
 
             render_box(col1, "LINEA 1", "#FF4B4B", l1_stats)
             if pair_assets: render_box(col2, "LINEA 2", "#1C83E1", pair_stats)
@@ -457,7 +458,7 @@ if uploaded_file is not None:
                 "Linea": "LINEA 1",
                 "Nome Asset": clean_asset_name(manual_asset),
                 "ISIN": "-",
-                "Peso %": "100.0%",
+                "Peso %": "100,0%", # <-- VIRGOLA PER EXCEL
                 **({"Controvalore": format_euro(euro_amount)} if show_euro else {})
             })
 
@@ -469,7 +470,7 @@ if uploaded_file is not None:
                         "Linea": "LINEA 2" if i == 0 else "",
                         "Nome Asset": clean_asset_name(a),
                         "ISIN": "-",
-                        "Peso %": f"{w*100:.1f}%",
+                        "Peso %": f"{w*100:.1f}%".replace(".", ","), # <-- VIRGOLA PER EXCEL
                         **({"Controvalore": format_euro(euro_amount * w)} if show_euro else {})
                     })
 
@@ -481,7 +482,7 @@ if uploaded_file is not None:
                         "Linea": "LINEA 3" if i == 0 else "",
                         "Nome Asset": clean_asset_name(a),
                         "ISIN": "-",
-                        "Peso %": f"{w*100:.1f}%",
+                        "Peso %": f"{w*100:.1f}%".replace(".", ","), # <-- VIRGOLA PER EXCEL
                         **({"Controvalore": format_euro(euro_amount * w)} if show_euro else {})
                     })
 
