@@ -139,7 +139,6 @@ def load_data(file):
                 else:
                     series = df[col].astype(str)
                 
-                # Sostituisce "undefined" con NaN
                 series = series.replace(r'(?i)undefined', np.nan, regex=True)
                 
                 converted = pd.to_numeric(series, errors='coerce')
@@ -147,7 +146,6 @@ def load_data(file):
                     clean_series = series.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
                     converted = pd.to_numeric(clean_series, errors='coerce')
                 
-                # Interpolazione lineare per i NaN
                 vals = converted.values
                 n = len(vals)
                 
@@ -295,36 +293,29 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 <tbody>
 <tr>
 <td class="table-line-header">Linea 1</td>
-<td class="table-sub-asset">...</td>
-<td></td>
-<td class="table-total-value">100.0%</td>
-<td class="table-total-value">{format_euro(euro_amount)}</td>
-</tr>
-<tr>
-<td></td>
 <td class="table-sub-asset">{clean_asset_name(manual_asset)}</td>
 <td>-</td>
 <td>100.0%</td>
 <td>{format_euro(euro_amount)}</td>
 </tr>
-"""
-
-    if pair_assets is not None:
-        sorted_pair = sorted(zip(pair_assets, pair_weights), key=lambda x: x[1], reverse=True)
-        html_template += f"""
 <tr>
-<td class="table-line-header">Linea 2</td>
-<td class="table-sub-asset">...</td>
+<td></td>
+<td class="table-total-label">TOTALE LINEA 1</td>
 <td></td>
 <td class="table-total-value">100.0%</td>
 <td class="table-total-value">{format_euro(euro_amount)}</td>
 </tr>
 """
-        for a, w in sorted_pair:
+
+    if pair_assets is not None:
+        sorted_pair = sorted(zip(pair_assets, pair_weights), key=lambda x: x[1], reverse=True)
+        html_template += "\n"
+        for i, (a, w) in enumerate(sorted_pair):
             euro_val = euro_amount * w
+            line_label = '<td class="table-line-header">Linea 2</td>' if i == 0 else '<td></td>'
             html_template += f"""
 <tr>
-<td></td>
+{line_label}
 <td class="table-sub-asset">{clean_asset_name(a)}</td>
 <td>-</td>
 <td>{w*100:.1f}%</td>
@@ -343,20 +334,13 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 
     if triplet_assets is not None:
         sorted_triplet = sorted(zip(triplet_assets, triplet_weights), key=lambda x: x[1], reverse=True)
-        html_template += f"""
-<tr>
-<td class="table-line-header">Linea 3</td>
-<td class="table-sub-asset">...</td>
-<td></td>
-<td class="table-total-value">100.0%</td>
-<td class="table-total-value">{format_euro(euro_amount)}</td>
-</tr>
-"""
-        for a, w in sorted_triplet:
+        html_template += "\n"
+        for i, (a, w) in enumerate(sorted_triplet):
             euro_val = euro_amount * w
+            line_label = '<td class="table-line-header">Linea 3</td>' if i == 0 else '<td></td>'
             html_template += f"""
 <tr>
-<td></td>
+{line_label}
 <td class="table-sub-asset">{clean_asset_name(a)}</td>
 <td>-</td>
 <td>{w*100:.1f}%</td>
@@ -379,6 +363,7 @@ def generate_allocation_html(euro_amount, manual_asset, pair_assets, pair_weight
 </div>
 """
     return html_template
+
 
 # --- UI APPLICAZIONE ---
 
