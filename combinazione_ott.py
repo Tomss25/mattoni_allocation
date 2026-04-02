@@ -146,7 +146,8 @@ def load_data(file):
                     clean_series = series.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
                     converted = pd.to_numeric(clean_series, errors='coerce')
                 
-                vals = converted.values
+                # FIX CRITICO: usiamo to_numpy(copy=True) per slegare la memoria ed evitare il "read-only"
+                vals = converted.to_numpy(copy=True)
                 n = len(vals)
                 
                 for i in range(n):
@@ -490,14 +491,13 @@ if uploaded_file is not None:
             df_alloc = pd.DataFrame(alloc_data)
             
             # --- STYLER PER LA WEB APP ---
-            def apply_borders(x):
+            def apply_highlights(x):
                 df_style = pd.DataFrame('', index=x.index, columns=x.columns)
                 for idx in last_row_indices:
-                    # Inietta il CSS solo nella vista Web per mantenere intatto il dataframe grezzo per Excel
-                    df_style.iloc[idx] = 'border-bottom: 2px solid #888888;' 
+                    df_style.iloc[idx] = 'background-color: #F0F2F6;' 
                 return df_style
                 
-            styled_df = df_alloc.style.apply(apply_borders, axis=None)
+            styled_df = df_alloc.style.apply(apply_highlights, axis=None)
             
             # --- PULSANTE EXPORT EXCEL ---
             buffer_euro = io.BytesIO()
