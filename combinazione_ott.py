@@ -146,7 +146,7 @@ def load_data(file):
                     clean_series = series.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
                     converted = pd.to_numeric(clean_series, errors='coerce')
                 
-                # FIX CRITICO: usiamo to_numpy(copy=True) per slegare la memoria ed evitare il "read-only"
+                # Slegamento memoria con to_numpy per evitare il Read-Only
                 vals = converted.to_numpy(copy=True)
                 n = len(vals)
                 
@@ -450,7 +450,12 @@ if uploaded_file is not None:
             
             show_euro = euro_amount > 0
             alloc_data = []
-            last_row_indices = []
+            
+            # Liste per tracciare a quale linea appartiene ciascuna riga, 
+            # così da applicare i colori visivi nella web app
+            l1_indices = []
+            l2_indices = []
+            l3_indices = []
 
             # Linea 1
             alloc_data.append({
@@ -460,7 +465,7 @@ if uploaded_file is not None:
                 "Peso %": "100,0%",
                 **({"Controvalore": format_euro(euro_amount)} if show_euro else {})
             })
-            last_row_indices.append(len(alloc_data) - 1)
+            l1_indices.append(len(alloc_data) - 1)
 
             # Linea 2
             if pair_assets is not None:
@@ -473,7 +478,7 @@ if uploaded_file is not None:
                         "Peso %": f"{w*100:.1f}%".replace(".", ","),
                         **({"Controvalore": format_euro(euro_amount * w)} if show_euro else {})
                     })
-                last_row_indices.append(len(alloc_data) - 1)
+                    l2_indices.append(len(alloc_data) - 1)
 
             # Linea 3
             if triplet_assets is not None:
@@ -486,18 +491,29 @@ if uploaded_file is not None:
                         "Peso %": f"{w*100:.1f}%".replace(".", ","),
                         **({"Controvalore": format_euro(euro_amount * w)} if show_euro else {})
                     })
-                last_row_indices.append(len(alloc_data) - 1)
+                    l3_indices.append(len(alloc_data) - 1)
 
             df_alloc = pd.DataFrame(alloc_data)
             
-            # --- STYLER PER LA WEB APP ---
-            def apply_highlights(x):
+            # --- STYLER PER LA WEB APP (Colori delle righe) ---
+            def apply_row_colors(x):
                 df_style = pd.DataFrame('', index=x.index, columns=x.columns)
-                for idx in last_row_indices:
-                    df_style.iloc[idx] = 'background-color: #F0F2F6;' 
+                
+                # Applica Verde Chiaro alla Linea 1
+                for idx in l1_indices:
+                    df_style.iloc[idx] = 'background-color: #E8F5E9; color: #000000;'
+                
+                # Applica Giallo Chiaro alla Linea 2
+                for idx in l2_indices:
+                    df_style.iloc[idx] = 'background-color: #FFFDE7; color: #000000;'
+                
+                # Applica Rosso Chiaro alla Linea 3
+                for idx in l3_indices:
+                    df_style.iloc[idx] = 'background-color: #FFEBEE; color: #000000;'
+                    
                 return df_style
                 
-            styled_df = df_alloc.style.apply(apply_highlights, axis=None)
+            styled_df = df_alloc.style.apply(apply_row_colors, axis=None)
             
             # --- PULSANTE EXPORT EXCEL ---
             buffer_euro = io.BytesIO()
@@ -514,7 +530,7 @@ if uploaded_file is not None:
                     use_container_width=True
                 )
             
-            # Tabella interattiva e formattata (solo per Web)
+            # Tabella interattiva e colorata (solo visualizzazione Streamlit)
             st.dataframe(styled_df, hide_index=True, use_container_width=True)
 
     else: st.error("File non valido.")
